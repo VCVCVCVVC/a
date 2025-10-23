@@ -215,7 +215,7 @@
             </svg>
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 relative z-20 text-center">
                 <p class="text-sm opacity-80">
-                    CRP v1.0 | معرف الوصول: <span id="user-id-display">جاري التحميل...</span>
+                    CRP v1.0 | معرف الوصول: <span id="user-id-display">N/A (JSONBin)</span>
                 </p>
                 <p class="text-xs opacity-70 mt-1">
                     تم تطويره مع مراعاة البساطة والتنظيم.
@@ -240,18 +240,18 @@
 
     </div>
 
-    <!-- Firebase Script Imports -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        
-        // Removed Firebase Storage imports: getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject
-
+    <script>
         // --- GLOBAL CONFIG & INITIALIZATION ---
         const ADMIN_PASS = "High-school$admin";
-        const FIREBASE_COLLECTION = "class_portal_data";
-        const FIREBASE_DOC_ID = "portal_config";
+        
+        // --- JSONBIN.IO CONFIGURATION (MUST BE UPDATED BY USER) ---
+        // BIN ID provided by the user: 68fa19f543b1c97be97a746a
+        const JSONBIN_ID = "68fa19f543b1c97be97a746a"; // <--- UPDATED!
+        const JSONBIN_SECRET_KEY = "$2a$10$OgesEl/ryBSJSZP6gf4Z3ecX20iq2yJoA6tEraNsO/UvPGhG1.29S"; // X-Master-Key provided by the user
+        const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
+
+        const POLLING_INTERVAL = 5000; // Check for updates every 5 seconds (to simulate real-time)
+
         const SUBJECTS = [
             "الرياضيات", "الفيزياء", "الكيمياء", "علوم الأرض",
             "مصادر البحث والمعلومات", "التنمية المستدامة"
@@ -274,150 +274,175 @@
             'note': 'ملاحظة'
         };
 
-        let db, auth; // Removed storage
         let currentData = null;
         let isDarkMode = true;
         let isAdmin = false;
-        let currentUserId = 'anonymous';
         let currentFilters = {}; // { subjectName: 'filterType' }
         
         // Map to store temporary Blob URLs for the current session (to be reused upon re-rendering)
         let localFileUrls = new Map(); 
 
-        // Initial MVP Data Structure (Updated to reflect new types and file sharing concept)
+        // Initial MVP Data Structure (Matching the selected canvas data for fallback)
         const MVP_DATA = {
-            subjects: {
+            "subjects": {
                 "الرياضيات": [
-                    {
-                        title: "واجب منزلي: ورقة عمل الجبر",
-                        description: "حل جميع التمارين في الصفحات 32–35.",
-                        due_date: "2025-10-30",
-                        type: "homework",
-                        file: "https://placehold.co/100x40/00A693/FFFFFF?text=Sheet", // Example file link
-                        pinned: true,
-                        id: crypto.randomUUID()
-                    },
-                     {
-                        title: "اختبار قصير: الدوال المثلثية",
-                        description: "الاستعداد للاختبار القصير في نهاية الأسبوع.",
-                        due_date: "2025-10-25", 
-                        type: "exam",
-                        file: "",
-                        pinned: false,
-                        id: crypto.randomUUID() + "-exam"
-                    },
-                    {
-                        title: "تقرير: نظرية الأوتار",
-                        description: "ملخص عن أهمية نظرية الأوتار في الفيزياء الحديثة.",
-                        due_date: "2024-10-15", // Past date for archive testing
-                        type: "research", 
-                        file: "",
-                        pinned: false,
-                        id: crypto.randomUUID() + "-old"
-                    }
+                  {
+                    "title": "واجب منزلي: ورقة عمل الجبر",
+                    "description": "حل جميع التمارين في الصفحات 32–35.",
+                    "due_date": "2025-10-30",
+                    "type": "homework",
+                    "file": "https://placehold.co/100x40/00A693/FFFFFF?text=Sheet",
+                    "pinned": true,
+                    "id": "math-1"
+                  },
+                  {
+                    "title": "اختبار قصير: الدوال المثلثية",
+                    "description": "الاستعداد للاختبار القصير في نهاية الأسبوع.",
+                    "due_date": "2025-10-25",
+                    "type": "exam",
+                    "file": "",
+                    "pinned": false,
+                    "id": "math-2"
+                  },
+                  {
+                    "title": "تقرير: نظرية الأوتار",
+                    "description": "ملخص عن أهمية نظرية الأوتار في الفيزياء الحديثة.",
+                    "due_date": "2024-10-15",
+                    "type": "research",
+                    "file": "",
+                    "pinned": false,
+                    "id": "math-3-old"
+                  }
                 ],
                 "الفيزياء": [
-                    {
-                        title: "تسليم البحث: الطاقة النووية",
-                        description: "تحميل البحث كمستند PDF قبل الموعد النهائي.",
-                        due_date: "2025-11-02",
-                        type: "research", 
-                        file: "https://placehold.co/100x40/00A693/FFFFFF?text=PDF_Doc", // Example file link
-                        pinned: false,
-                        id: crypto.randomUUID()
-                    },
-                    {
-                        title: "صورة مرجعية: طاقة الكويكبات",
-                        description: "صورة تم نشرها بواسطة ناسا كمصدر للمطوية.",
-                        due_date: "2025-11-15",
-                        type: "file", // Now handles files/photos
-                        file: "https://placehold.co/400x200/FFDAB9/000000?text=Reference+Image", // Example image link
-                        pinned: false,
-                        id: crypto.randomUUID() + "-brochure"
-                    }
+                  {
+                    "title": "تسليم البحث: الطاقة النووية",
+                    "description": "تحميل البحث كمستند PDF قبل الموعد النهائي.",
+                    "due_date": "2025-11-02",
+                    "type": "research",
+                    "file": "https://placehold.co/100x40/00A693/FFFFFF?text=PDF_Doc",
+                    "pinned": false,
+                    "id": "physics-1"
+                  },
+                  {
+                    "title": "صورة مرجعية: طاقة الكويكبات",
+                    "description": "صورة تم نشرها بواسطة ناسا كمصدر للمطوية.",
+                    "due_date": "2025-11-15",
+                    "type": "file",
+                    "file": "https://placehold.co/400x200/FFDAB9/000000?text=Reference+Image",
+                    "pinned": false,
+                    "id": "physics-2"
+                  }
                 ],
                 "الكيمياء": [],
                 "علوم الأرض": [],
                 "مصادر البحث والمعلومات": [],
                 "التنمية المستدامة": []
             },
-            admin_pass: ADMIN_PASS
+            "meta": {
+                "version": "1.0",
+                "admin_pass": ADMIN_PASS
+            }
         };
 
-        // Utility to get Firestore path for public data
-        function getFirestorePath(appId, collection, docId) {
-            return `/artifacts/${appId}/public/data/${collection}/${docId}`;
-        }
+        // --- JSONBIN UTILITIES ---
 
-        async function initApp() {
-            try {
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-
-                if (!firebaseConfig || !firebaseConfig.apiKey) {
-                    console.error("Firebase configuration is missing or invalid.");
-                    document.getElementById('main-content').innerHTML = '<p class="text-center text-red-500">خطأ: إعدادات Firebase مفقودة. لا يمكن تحميل البيانات.</p>';
-                    return;
+        async function fetchJsonBinData() {
+            if (JSONBIN_ID === "YOUR_JSONBIN_ID" || JSONBIN_SECRET_KEY === "") {
+                console.error("JSONBIN_ID or Secret Key is not set. Using MVP data.");
+                currentData = MVP_DATA;
+                // Since this runs in a loop, only render on the first run if we use fallback
+                if (!document.getElementById('remaining-count').textContent) { 
+                    renderApp(); 
                 }
-
-                // Load theme preference
-                const savedTheme = localStorage.getItem(THEME_KEY);
-                isDarkMode = savedTheme === 'dark';
-                document.body.setAttribute('data-theme', savedTheme || 'dark');
-                document.body.classList.toggle('dark', isDarkMode);
-
-                const modeIcon = document.getElementById('mode-icon');
-                modeIcon.classList.replace(isDarkMode ? 'ph-moon' : 'ph-sun', isDarkMode ? 'ph-sun' : 'ph-moon');
-
-
-                // Load saved filters
-                SUBJECTS.forEach(subjectName => {
-                    const savedFilter = localStorage.getItem(FILTER_KEY_PREFIX + subjectName);
-                    if (savedFilter) {
-                        currentFilters[subjectName] = savedFilter;
+                return;
+            }
+            
+            try {
+                const response = await fetch(JSONBIN_URL + '/latest', {
+                    headers: {
+                        'X-Master-Key': JSONBIN_SECRET_KEY,
+                        'X-Bin-Meta': 'false' // Get raw data, not metadata
                     }
                 });
-
-
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                // Authenticate (use custom token if available, otherwise anonymous)
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
-
-                currentUserId = auth.currentUser?.uid || 'anonymous-user';
-                document.getElementById('user-id-display').textContent = currentUserId;
-
-                startFirestoreListener(appId);
+                
+                const data = await response.json();
+                currentData = data;
+                // console.log("Data loaded from JSONBin:", currentData); // Keep quiet for production
             } catch (error) {
-                console.error("Initialization Error:", error);
-                document.getElementById('main-content').innerHTML = '<p class="text-center text-red-500">حدث خطأ أثناء تهيئة التطبيق.</p>';
+                console.error("JSONBin Fetch Error (using MVP data as fallback):", error);
+                // Fallback to local MVP data if fetch fails
+                if (!currentData) { // Only set fallback if no data loaded previously
+                    currentData = MVP_DATA;
+                }
+            } finally {
+                renderApp();
             }
         }
 
-        function startFirestoreListener(appId) {
-            const docRef = doc(db, getFirestorePath(appId, FIREBASE_COLLECTION, FIREBASE_DOC_ID));
+        async function updateJsonBinData(data) {
+            if (JSONBIN_ID === "YOUR_JSONBIN_ID" || JSONBIN_SECRET_KEY === "") {
+                 console.error("JSONBIN_ID or Secret Key is not set. Data not saved.");
+                 return;
+            }
+            
+            try {
+                const response = await fetch(JSONBIN_URL, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Master-Key': JSONBIN_SECRET_KEY,
+                        // Allow updates only via the master key
+                    },
+                    body: JSON.stringify(data)
+                });
 
-            onSnapshot(docRef, async (docSnap) => {
-                if (docSnap.exists()) {
-                    currentData = docSnap.data();
-                    console.log("Data loaded from Firestore:", currentData);
-                } else {
-                    console.log("No data found, initializing with MVP data.");
-                    currentData = MVP_DATA;
-                    // Attempt to create the initial document
-                    await setDoc(docRef, MVP_DATA).catch(e => console.error("Error setting initial document:", e));
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                renderApp();
-            }, (error) => {
-                console.error("Firestore Listener Error:", error);
-                document.getElementById('main-content').innerHTML = '<p class="text-center text-red-500">خطأ في جلب البيانات في الوقت الحقيقي.</p>';
+                
+                // Success, the next polling cycle will pick up the change
+                // console.log("Data successfully updated on JSONBin."); // Keep quiet
+            } catch (error) {
+                console.error("JSONBin Update Error:", error);
+                alert("فشل حفظ البيانات. يرجى التحقق من المفتاح السري ومعرف البين.");
+            }
+        }
+
+        // --- APP INITIALIZATION ---
+
+        function startPolling() {
+            // First fetch is immediate, then poll every POLLING_INTERVAL
+            fetchJsonBinData(); 
+            setInterval(fetchJsonBinData, POLLING_INTERVAL);
+        }
+
+        function initApp() {
+            // Load theme preference
+            const savedTheme = localStorage.getItem(THEME_KEY);
+            isDarkMode = savedTheme === 'dark';
+            document.body.setAttribute('data-theme', savedTheme || 'dark');
+            document.body.classList.toggle('dark', isDarkMode);
+
+            const modeIcon = document.getElementById('mode-icon');
+            // Ensure correct icon is set initially based on isDarkMode state
+            modeIcon.classList.remove('ph-sun', 'ph-moon');
+            modeIcon.classList.add(isDarkMode ? 'ph-sun' : 'ph-moon');
+
+
+            // Load saved filters
+            SUBJECTS.forEach(subjectName => {
+                const savedFilter = localStorage.getItem(FILTER_KEY_PREFIX + subjectName);
+                if (savedFilter) {
+                    currentFilters[subjectName] = savedFilter;
+                }
             });
+
+            startPolling();
         }
 
         // --- LOCAL STORAGE UTILITIES ---
@@ -865,7 +890,7 @@
             }, 300);
         };
         
-        // Show loading modal (Kept, but not actively used for instant local upload)
+        // Show loading modal (Kept for consistency)
         function showLoadingModal(message = 'جارٍ تحميل الملفات، يرجى الانتظار...') {
             document.getElementById('loading-message').textContent = message;
             document.getElementById('loading-modal-backdrop').classList.remove('hidden');
@@ -922,13 +947,10 @@
 
         // --- ADMIN CRUD LOGIC (simplified) ---
 
-        function updateFirestore(updatedSubjects) {
-            if (!db) return console.error("Firestore not initialized.");
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-            const docRef = doc(db, getFirestorePath(appId, FIREBASE_COLLECTION, FIREBASE_DOC_ID));
+        function updateData(updatedSubjects) {
             const newConfig = { ...currentData, subjects: updatedSubjects };
-
-            setDoc(docRef, newConfig).catch(e => console.error("Error updating document:", e));
+            currentData = newConfig; // Update local state immediately
+            updateJsonBinData(newConfig); // Async update to JSONBin
         }
         
         // Helper function to clean item data before saving
@@ -1082,7 +1104,7 @@
             newItem.file = newFileUrl; // Assign the final file URL
 
 
-            // 3. Clean and Save to Firestore
+            // 3. Clean and Save to Data Store
             newItem = cleanItemData(newItem);
             
             const currentSubjectName = formData.get('subjectName');
@@ -1115,7 +1137,7 @@
                 }
             }
 
-            updateFirestore(updatedSubjects);
+            updateData(updatedSubjects); // Uses the new JSONBin update logic
             closeModal(); 
         };
 
@@ -1135,9 +1157,9 @@
                         URL.revokeObjectURL(itemToDelete.file);
                     }
                     
-                    // Remove item from Firestore data structure
+                    // Remove item from data structure
                     subjectItems.splice(index, 1);
-                    updateFirestore(updatedSubjects);
+                    updateData(updatedSubjects);
                 }
                 closeModal();
             };
@@ -1221,7 +1243,7 @@
         // --- ENTRY POINT ---
         window.onload = function() {
             initDevToolsLock(); // Start anti-inspect feature
-            initApp();          // Initialize Firebase and data listener
+            initApp();          // Initialize JSONBin data listener
             // Theme setup is handled in initApp based on localStorage or default
         };
     </script>
