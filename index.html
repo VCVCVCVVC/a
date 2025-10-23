@@ -25,6 +25,9 @@
             --card-bg: #ffffff;
             --card-border: #e0e6f0;
             --header-bg: linear-gradient(135deg, #004D40 0%, #00897B 100%);
+            --notify-success: #10B981;
+            --notify-error: #EF4444;
+            --notify-info: #3B82F6;
         }
         [data-theme="dark"] {
             --bg-color: #1a1a1a; /* Dark background */
@@ -32,6 +35,9 @@
             --card-bg: #282828; /* Slightly lighter card */
             --card-border: #444444;
             --header-bg: linear-gradient(135deg, #101010 0%, #003328 100%); /* Dark to Deep Green/Black */
+            --notify-success: #34D399;
+            --notify-error: #F87171;
+            --notify-info: #60A5FA;
         }
         body {
             font-family: 'Poppins', sans-serif;
@@ -143,6 +149,36 @@
             background-color: var(--color-green);
             transition: width 0.3s;
         }
+        
+        /* New Notification Container Styles */
+        #notification-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column-reverse; /* Newest on bottom */
+            gap: 10px;
+        }
+        .toast {
+            min-width: 250px;
+            max-width: 90vw;
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transform: translateX(100%);
+            opacity: 0;
+            transition: transform 0.4s ease-out, opacity 0.4s ease-out;
+        }
+        .toast.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        .toast.success { border-right: 4px solid var(--notify-success); }
+        .toast.error { border-right: 4px solid var(--notify-error); }
+        .toast.info { border-right: 4px solid var(--notify-info); }
+        
     </style>
 </head>
 <body data-theme="dark" class="dark">
@@ -185,15 +221,24 @@
                     </div>
                 </div>
                 <!-- Completion Tracker Summary -->
-                <div id="completion-summary" class="mt-8 p-4 rounded-xl bg-black bg-opacity-50 border border-green-800 border-opacity-50 flex items-center justify-between text-sm sm:text-lg font-semibold shadow-inner">
-                    <p class="flex items-center">
-                        <i class="ph ph-chart-line-up text-green-400 text-2xl ml-3"></i>
-                        <span>إجمالي المهام المتبقية: <span id="remaining-count">0</span></span>
-                    </p>
-                    <p class="text-accent-gold flex items-center">
-                        <i class="ph ph-check-circle text-2xl ml-3"></i>
-                        <span>تم الإنجاز: <span id="completed-count">0</span> (<span id="completed-percent">0%</span>)</span>
-                    </p>
+                <div id="completion-summary" class="mt-8 p-4 rounded-xl bg-black bg-opacity-50 border border-green-800 border-opacity-50 flex flex-col sm:flex-row items-center justify-between text-sm sm:text-lg font-semibold shadow-inner">
+                    <div class="flex items-center w-full sm:w-auto mb-2 sm:mb-0">
+                        <p class="flex items-center">
+                            <i class="ph ph-chart-line-up text-green-400 text-2xl ml-3"></i>
+                            <span>إجمالي المهام المتبقية: <span id="remaining-count">0</span></span>
+                        </p>
+                        <p class="text-accent-gold flex items-center mr-6">
+                            <i class="ph ph-check-circle text-2xl ml-3"></i>
+                            <span>تم الإنجاز: <span id="completed-count">0</span> (<span id="completed-percent">0%</span>)</span>
+                        </p>
+                    </div>
+                    <!-- New: Global Archive Toggle and Motivational Message -->
+                    <div class="flex items-center justify-between w-full sm:w-auto">
+                        <p id="motivational-message" class="text-xs sm:text-sm font-medium italic"></p>
+                        <button id="global-archive-toggle" onclick="toggleGlobalArchive()" class="px-3 py-1 rounded-full text-xs font-semibold bg-white bg-opacity-20 hover:bg-opacity-30 transition-colors ml-4 whitespace-nowrap">
+                            إخفاء الأرشيفات
+                        </button>
+                    </div>
                 </div>
             </div>
             <!-- Wave SVG -->
@@ -215,15 +260,15 @@
             </svg>
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 relative z-20 text-center">
                 <p class="text-sm opacity-80">
-                    CRP v1.0 | معرف الوصول: <span id="user-id-display">N/A (JSONBin)</span>
+                    CSE v1.0  <span id="user-id-display"></span>
                 </p>
                 <p class="text-xs opacity-70 mt-1">
-                    تم تطويره مع مراعاة البساطة والتنظيم.
+                    تم تطويره من قبل زياد
                 </p>
             </div>
         </footer>
 
-        <!-- Generic Modal Structure (for Admin Login, Add/Edit, QR Code) -->
+        <!-- Generic Modal Structure (for Admin Login, Add/Edit, QR Code, Confirmation) -->
         <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm hidden items-center justify-center z-50">
             <div id="modal-content" class="p-6 rounded-xl shadow-2xl w-full max-w-md mx-4 transition-all scale-95 opacity-0 duration-300" style="background-color: var(--card-bg);">
                 <!-- Modal content will be injected here -->
@@ -237,6 +282,9 @@
                 <p id="loading-message" class="mt-4 text-lg">جارٍ تحميل الملفات، يرجى الانتظار...</p>
             </div>
         </div>
+
+        <!-- NEW: Notification Container -->
+        <div id="notification-container"></div>
 
     </div>
 
@@ -262,6 +310,9 @@
         const THEME_KEY = "crp_theme";
         const FILTER_KEY_PREFIX = "crp_filter_";
         const ARCHIVE_KEY_PREFIX = "crp_archive_visible_";
+        // New: Global Archive Toggle Key
+        const GLOBAL_ARCHIVE_KEY = "crp_global_archive_hidden"; 
+
 
         // UPDATED: Final requirement types based on user requests
         const TYPE_MAP = {
@@ -387,6 +438,7 @@
         async function updateJsonBinData(data) {
             if (JSONBIN_ID === "YOUR_JSONBIN_ID" || JSONBIN_SECRET_KEY === "") {
                  console.error("JSONBIN_ID or Secret Key is not set. Data not saved.");
+                 showNotification("فشل حفظ البيانات. يرجى التحقق من مفتاح JSONBin.", "error");
                  return;
             }
             
@@ -405,11 +457,12 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
+                showNotification("تم حفظ البيانات بنجاح.", "success");
                 // Success, the next polling cycle will pick up the change
                 // console.log("Data successfully updated on JSONBin."); // Keep quiet
             } catch (error) {
                 console.error("JSONBin Update Error:", error);
-                alert("فشل حفظ البيانات. يرجى التحقق من المفتاح السري ومعرف البين.");
+                showNotification("فشل حفظ البيانات. يرجى التحقق من المفتاح السري ومعرف البين.", "error");
             }
         }
 
@@ -441,6 +494,9 @@
                     currentFilters[subjectName] = savedFilter;
                 }
             });
+            
+            // Set initial global archive state
+            updateGlobalArchiveToggleUI();
 
             startPolling();
         }
@@ -458,12 +514,20 @@
         }
 
         function markAllAsSeen(allRequirements) {
-            const seenItems = new Set();
-            allRequirements.forEach(item => seenItems.add(item.id));
-            try {
-                localStorage.setItem(NEW_TAG_KEY, JSON.stringify(Array.from(seenItems)));
-            } catch (e) {
-                console.error("Error writing to localStorage (Seen):", e);
+            const seenItems = getSeenItems();
+            let changed = false;
+            allRequirements.forEach(item => {
+                if (!seenItems.has(item.id)) {
+                    seenItems.add(item.id);
+                    changed = true;
+                }
+            });
+            if (changed) {
+                try {
+                    localStorage.setItem(NEW_TAG_KEY, JSON.stringify(Array.from(seenItems)));
+                } catch (e) {
+                    console.error("Error writing to localStorage (Seen):", e);
+                }
             }
         }
 
@@ -486,19 +550,49 @@
             }
             try {
                 localStorage.setItem(COMPLETED_ITEMS_KEY, JSON.stringify(Array.from(completedItems)));
+                showNotification(completedItems.has(itemId) ? "تم وضع المتطلب كمنجز." : "تم إلغاء إنجاز المتطلب.", "info", 2000);
             } catch (e) {
                 console.error("Error writing to localStorage (Completed):", e);
+                showNotification("فشل في تحديث حالة الإنجاز.", "error", 2000);
             }
             renderApp(); // Rerender to update counter and checkbox state
         }
 
         function isArchiveVisible(subjectName) {
-            const stored = localStorage.getItem(ARCHIVE_KEY_PREFIX + subjectName);
-            return stored === 'true';
+            // Check global state first
+            if (localStorage.getItem(GLOBAL_ARCHIVE_KEY) === 'true') {
+                 return false; // Global hide overrides local show
+            }
+            // Fallback to local state if global is not set to hide
+            return localStorage.getItem(ARCHIVE_KEY_PREFIX + subjectName) !== 'false';
+        }
+        
+        // New: Update UI for global archive toggle
+        function updateGlobalArchiveToggleUI() {
+            const isHidden = localStorage.getItem(GLOBAL_ARCHIVE_KEY) === 'true';
+            const button = document.getElementById('global-archive-toggle');
+            if (button) {
+                if (isHidden) {
+                    button.textContent = 'عرض الأرشيفات';
+                    button.classList.replace('bg-opacity-20', 'bg-opacity-40');
+                } else {
+                    button.textContent = 'إخفاء الأرشيفات';
+                    button.classList.replace('bg-opacity-40', 'bg-opacity-20');
+                }
+            }
+        }
+        
+        // New: Toggle all archives globally
+        window.toggleGlobalArchive = function() {
+            const isHidden = localStorage.getItem(GLOBAL_ARCHIVE_KEY) === 'true';
+            localStorage.setItem(GLOBAL_ARCHIVE_KEY, isHidden ? 'false' : 'true');
+            updateGlobalArchiveToggleUI();
+            renderApp();
         }
 
         window.toggleArchiveVisibility = function(subjectName) {
             const isVisible = isArchiveVisible(subjectName);
+            // This is now only a local override toggle if the global one is 'false' (visible)
             localStorage.setItem(ARCHIVE_KEY_PREFIX + subjectName, isVisible ? 'false' : 'true');
             renderApp();
         }
@@ -517,6 +611,7 @@
         }
 
         window.toggleCompleted = toggleCompleted;
+        window.performConfirmedDeletion = performConfirmedDeletion; // Make global for string execution
 
 
         // --- UI RENDERING FUNCTIONS ---
@@ -534,6 +629,24 @@
                 default: return `<i class="ph ph-info text-xl text-gray-400"></i>`;
             }
         }
+        
+        // New helper to determine file type for display
+        function getFileDisplayInfo(fileUrl) {
+            if (!fileUrl) return { displayName: '', icon: '' };
+
+            if (fileUrl.startsWith('blob:')) {
+                return { displayName: 'ملف محلي (صورة/مستند)', icon: '<i class="ph ph-folder-open text-xs ml-1"></i>' };
+            }
+            
+            const lowerUrl = fileUrl.toLowerCase();
+            if (lowerUrl.includes('.pdf')) return { displayName: 'مستند PDF', icon: '<i class="ph ph-file-pdf text-xs ml-1"></i>' };
+            if (lowerUrl.includes('.zip') || lowerUrl.includes('.rar')) return { displayName: 'أرشيف مضغوط', icon: '<i class="ph ph-archive-box text-xs ml-1"></i>' };
+            if (lowerUrl.includes('.png') || lowerUrl.includes('.jpg') || lowerUrl.includes('.jpeg') || lowerUrl.includes('.gif')) return { displayName: 'صورة (JPG/PNG)', icon: '<i class="ph ph-image text-xs ml-1"></i>' };
+            if (lowerUrl.includes('.doc') || lowerUrl.includes('.docx')) return { displayName: 'مستند Word', icon: '<i class="ph ph-file-doc text-xs ml-1"></i>' };
+            if (lowerUrl.startsWith('http')) return { displayName: 'رابط خارجي', icon: '<i class="ph ph-globe-simple text-xs ml-1"></i>' };
+            
+            return { displayName: 'رابط/ملف غير محدد', icon: '<i class="ph ph-file text-xs ml-1"></i>' };
+        }
 
         function isDuePast(dateString) {
             if (!dateString) return false;
@@ -546,9 +659,11 @@
 
         function renderRequirementCard(subjectName, item, isArchived = false) {
             const dueDate = item.due_date ? `يستحق: ${item.due_date}` : '';
-            // Get the displayed file name, handling local Blob URLs
-            const fileDisplayName = item.file && item.file.startsWith('blob:') ? 'ملف محلي' : (item.file || '');
-            const fileLink = item.file ? `<a href="${item.file}" target="_blank" class="text-xs text-green-500 hover:text-green-400 font-semibold truncate">${fileDisplayName}</a>` : '';
+            
+            // Get the displayed file name and icon (NEW)
+            const fileInfo = getFileDisplayInfo(item.file);
+            const fileLink = item.file ? `<a href="${item.file}" target="_blank" class="text-xs text-green-500 hover:text-green-400 font-semibold truncate flex items-center">${fileInfo.icon} ${fileInfo.displayName}</a>` : '';
+
 
             // Status Check
             const completedItems = getCompletedItems();
@@ -666,6 +781,29 @@
             document.getElementById('remaining-count').textContent = remainingTasks;
             document.getElementById('completed-count').textContent = completedTasks;
             document.getElementById('completed-percent').textContent = completedPercent + '%';
+            
+            // NEW: Update motivational message
+            const motivationalMessage = document.getElementById('motivational-message');
+            if (motivationalMessage) {
+                if (totalTasks === 0) {
+                     motivationalMessage.textContent = "لا توجد متطلبات حالية. استمتع بيومك!";
+                     motivationalMessage.classList.add('text-green-300');
+                     motivationalMessage.classList.remove('text-red-300');
+                } else if (remainingTasks === 0) {
+                     motivationalMessage.textContent = "تهانينا! لقد أنجزت كل شيء. أداء رائع!";
+                     motivationalMessage.classList.add('text-green-300');
+                     motivationalMessage.classList.remove('text-red-300');
+                } else if (completedPercent >= 75) {
+                     motivationalMessage.textContent = "أنت تحقق تقدمًا ممتازًا! استمر في العمل الجيد.";
+                     motivationalMessage.classList.add('text-green-300');
+                     motivationalMessage.classList.remove('text-red-300');
+                } else {
+                     motivationalMessage.textContent = `لا يزال لديك ${remainingTasks} مهام متبقية. لديك الوقت الكافي لإنجازها!`;
+                     motivationalMessage.classList.add('text-red-300');
+                     motivationalMessage.classList.remove('text-green-300');
+                }
+            }
+
 
             // --- 2. Render Subjects ---
             subjectKeys.forEach(subjectName => {
@@ -762,23 +900,29 @@
                         </button>
                     `;
                 }
-
-                mainContentHTML += `
-                    <section class="mb-12">
-                        <div class="flex justify-between items-center mb-1 border-b pb-2" style="border-color: var(--card-border);">
-                            <h2 class="text-2xl font-bold text-gradient">${subjectName}</h2>
-                            ${adminAddButton}
-                        </div>
-                        ${filtersHtml}
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-4">
-                            ${currentItemsHtml}
-                        </div>
-                    </section>
-                `;
+                
+                // Show section only if there are items or admin can add
+                if (filteredItems.length > 0 || isAdmin) {
+                    mainContentHTML += `
+                        <section class="mb-12">
+                            <div class="flex justify-between items-center mb-1 border-b pb-2" style="border-color: var(--card-border);">
+                                <h2 class="text-2xl font-bold text-gradient">${subjectName}</h2>
+                                ${adminAddButton}
+                            </div>
+                            ${filtersHtml}
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-4">
+                                ${currentItemsHtml}
+                            </div>
+                        </section>
+                    `;
+                }
 
                 // Render Archive Section ONLY if there are archived items matching the search
                 if (archivedItems.length > 0) {
-                    const isVisible = isArchiveVisible(subjectName);
+                    const isGlobalHidden = localStorage.getItem(GLOBAL_ARCHIVE_KEY) === 'true';
+                    const isLocalHidden = localStorage.getItem(ARCHIVE_KEY_PREFIX + subjectName) === 'false';
+                    const isVisible = isGlobalHidden ? false : !isLocalHidden;
+                    
                     const archiveHtml = archivedItems.map(item => renderRequirementCard(subjectName, item, true)).join('');
                     
                     const archiveContent = isVisible ? `
@@ -787,7 +931,9 @@
                         </div>
                     ` : '';
 
-                    const toggleButton = `
+                    const toggleButton = isGlobalHidden ? 
+                        `<span class="text-xs text-gray-500">مخفي عالميًا</span>` : 
+                        `
                         <button onclick="toggleArchiveVisibility('${subjectName}')" class="text-xs font-semibold text-gray-400 hover:text-green-400 transition-colors flex items-center">
                             <i class="ph ph-${isVisible ? 'caret-up' : 'caret-down'} ml-1"></i>
                             ${isVisible ? 'إخفاء' : 'عرض'} الأرشيف (${archivedItems.length})
@@ -903,18 +1049,58 @@
             document.getElementById('loading-modal-backdrop').classList.add('hidden');
         }
 
+        // NEW: Notification Function (Toast)
+        /**
+         * Shows a temporary notification toast.
+         * @param {string} message The notification message.
+         * @param {('success'|'error'|'info')} type The type of notification.
+         * @param {number} duration Duration in milliseconds.
+         */
+        function showNotification(message, type = 'info', duration = 3000) {
+            const container = document.getElementById('notification-container');
+            const toast = document.createElement('div');
+            
+            let icon = '';
+            switch(type) {
+                case 'success': icon = '<i class="ph ph-check-circle text-lg text-green-400 ml-2"></i>'; break;
+                case 'error': icon = '<i class="ph ph-x-octagon text-lg text-red-400 ml-2"></i>'; break;
+                case 'info': icon = '<i class="ph ph-info text-lg text-blue-400 ml-2"></i>'; break;
+                default: icon = '';
+            }
+
+            toast.className = `toast ${type} flex items-center text-sm`;
+            toast.innerHTML = `${icon} <span class="flex-1">${message}</span>`;
+            
+            container.appendChild(toast);
+            
+            // Show toast
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 50);
+
+            // Hide and remove toast
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    container.removeChild(toast);
+                }, 400); // Wait for transition
+            }, duration);
+        }
+        window.showNotification = showNotification; // Make global
+
 
         // --- ADMIN LOGIN LOGIC ---
 
         window.showAdminLoginModal = function() {
             if (isAdmin) {
                 // If already logged in, show a confirmation/logout
-                showInfoModal('وضع المسؤول', 'أنت مسجل حاليًا كمسؤول. للعودة إلى عرض الطالب، يرجى النقر على "تسجيل الخروج".', () => {
+                showInfoModal('وضع المسؤول', 'أنت مسجل حاليًا كمسؤول. للعودة إلى عرض الطالب، يرجى النقر على "تسجيل الخروج".', `
                     isAdmin = false;
                     renderApp();
                     document.getElementById('admin-toggle').textContent = 'المسؤول';
                     closeModal();
-                }, 'تسجيل الخروج');
+                    showNotification('تم تسجيل الخروج من وضع المسؤول.', 'info');
+                `, 'تسجيل الخروج');
                 return;
             }
 
@@ -939,9 +1125,11 @@
                 closeModal();
                 renderApp();
                 document.getElementById('admin-toggle').textContent = 'المسؤول (مسجل الدخول)';
+                showNotification('تم تسجيل الدخول بنجاح كمسؤول.', 'success');
             } else {
                 errorElement.textContent = "كلمة المرور غير صحيحة. حاول مرة أخرى.";
                 errorElement.classList.remove('hidden');
+                showNotification('فشل تسجيل الدخول: كلمة مرور غير صحيحة.', 'error', 2000);
             }
         };
 
@@ -994,8 +1182,9 @@
             const subjectOptions = SUBJECTS.map(s => `<option value="${s}" ${s === item.subjectName ? 'selected' : ''}>${s}</option>`).join('');
             
             // Get file name for display if it's a local Blob URL
-            const currentFileName = item.file && item.file.startsWith('blob:') ? 'ملف محلي مُحمَّل (' + item.file.split('/').pop() + ')' : 
-                                  (item.file ? 'رابط ثابت' : '');
+            const fileInfo = getFileDisplayInfo(item.file);
+            const currentFileName = item.file ? `${fileInfo.icon} ${fileInfo.displayName} (${item.file.startsWith('blob:') ? 'محلي' : 'خارجي'})` : '';
+
 
             document.getElementById('modal-content').innerHTML = `
                 <h2 class="text-xl font-bold mb-4 text-center">${item.isNew ? 'إضافة متطلب جديد' : 'تعديل المتطلب'}</h2>
@@ -1021,10 +1210,10 @@
                         </div>
                     </div>
                     
-                    ${item.file ? `<p class="text-xs text-gray-500 mt-3">الملف الحالي: <span class="${item.file.startsWith('blob:') ? 'text-yellow-500' : 'text-green-500'}">${currentFileName}</span></p>` : ''}
+                    ${item.file ? `<p class="text-xs text-gray-500 mt-3 flex items-center">الملف الحالي: <span class="mr-1 ${item.file.startsWith('blob:') ? 'text-yellow-500' : 'text-green-500'}">${currentFileName}</span></p>` : ''}
 
                     <label for="modal-link" class="block text-sm font-medium mb-1 mt-3">رابط خارجي (اختياري)</label>
-                    <input type="text" id="modal-link" name="fileLink" value="${item.file && !item.file.startsWith('blob:') ? item.file : ''}" placeholder="أدخل رابط PDF, ZIP, PNG, أو رابط خارجي ثابت..." class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);" />
+                    <textarea id="modal-link" name="fileLink" rows="3" placeholder="أدخل رابط PDF, ZIP, PNG, أو رابط خارجي ثابت..." class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);">${item.file && !item.file.startsWith('blob:') ? item.file : ''}</textarea>
 
                     <label for="modal-file" class="block text-sm font-medium mb-1 mt-3">أو قم بتحميل ملف/صورة **محلي** (اختياري)</label>
                     <input type="file" id="modal-file" name="file" class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500 file:ml-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100" style="background-color: var(--bg-color);" />
@@ -1116,6 +1305,7 @@
                 // ADD
                 updatedSubjects[currentSubjectName] = updatedSubjects[currentSubjectName] || [];
                 updatedSubjects[currentSubjectName].push(newItem);
+                showNotification(`تمت إضافة المتطلب: ${newItem.title}.`, 'success');
             } else {
                 // EDIT (Logic for moving or updating item)
                 let itemFound = false;
@@ -1124,9 +1314,11 @@
                     if (index !== -1) {
                         if (subj === currentSubjectName) {
                             updatedSubjects[subj][index] = newItem;
+                            showNotification(`تم تحديث المتطلب: ${newItem.title}.`, 'success');
                         } else {
                             updatedSubjects[subj].splice(index, 1);
                             updatedSubjects[currentSubjectName].push(newItem);
+                            showNotification(`تم نقل وتحديث المتطلب: ${newItem.title} إلى ${currentSubjectName}.`, 'info');
                         }
                         itemFound = true;
                         break;
@@ -1134,6 +1326,7 @@
                 }
                 if (!itemFound) {
                     updatedSubjects[currentSubjectName].push(newItem);
+                    showNotification(`تمت إضافة المتطلب: ${newItem.title}.`, 'success');
                 }
             }
 
@@ -1141,16 +1334,20 @@
             closeModal(); 
         };
 
+        // --- FIX START: Deletion logic refactor ---
 
-        window.deleteRequirement = function(subjectName, itemId, shouldConfirm = false) {
-            
-            const performDeletion = async () => {
-                const updatedSubjects = JSON.parse(JSON.stringify(currentData.subjects));
-                const subjectItems = updatedSubjects[subjectName];
-                const index = subjectItems.findIndex(item => item.id === itemId);
+        // 1. New global function to perform the actual deletion (non-confirming)
+        async function performConfirmedDeletion(subjectName, itemId) {
+            const updatedSubjects = JSON.parse(JSON.stringify(currentData.subjects));
+            let deletedItemTitle = "متطلب"; // Default title
 
-                if (index > -1) {
-                    const itemToDelete = subjectItems[index];
+            // Find and remove the item
+            let itemFound = false;
+            for (const subj of SUBJECTS) {
+                const index = updatedSubjects[subj].findIndex(item => item.id === itemId);
+                if (index !== -1) {
+                    const itemToDelete = updatedSubjects[subj][index];
+                    deletedItemTitle = itemToDelete.title;
                     
                     // Cleanup local blob URL if it was used
                     if (itemToDelete.file && itemToDelete.file.startsWith('blob:')) {
@@ -1158,28 +1355,58 @@
                     }
                     
                     // Remove item from data structure
-                    subjectItems.splice(index, 1);
-                    updateData(updatedSubjects);
+                    updatedSubjects[subj].splice(index, 1);
+                    itemFound = true;
+                    break;
                 }
-                closeModal();
-            };
+            }
+
+            if (itemFound) {
+                updateData(updatedSubjects);
+                showNotification(`تم حذف المتطلب: ${deletedItemTitle}.`, 'info');
+            } else {
+                 console.warn(`Item ID ${itemId} not found for deletion.`);
+                 showNotification("فشل الحذف. لم يتم العثور على المتطلب.", 'error');
+            }
+
+            closeModal();
+        }
+
+        // 2. Updated deleteRequirement function to use the new global function and pass arguments as string
+        window.deleteRequirement = function(subjectName, itemId, shouldConfirm = false) {
             
             if (shouldConfirm) {
                  // Find the item to confirm deletion
                 const item = currentData.subjects[subjectName].find(i => i.id === itemId);
+                if (!item) {
+                     console.error("Attempted to delete non-existent item:", itemId);
+                     showNotification("لا يمكن الحذف: المتطلب غير موجود.", 'error');
+                     return;
+                }
+                
                 let message = `هل أنت متأكد من رغبتك في حذف المتطلب: **${item.title}**؟`;
                 if (item.file && item.file.startsWith('blob:')) {
                     message += ` **سيتم إلغاء الرابط المحلي للملف المرفق.**`;
                 }
                 
-                showInfoModal('تأكيد الحذف', message, performDeletion, 'نعم، احذف', true);
+                // FIX: Pass the action as a string that correctly quotes the subjectName and itemId.
+                // This ensures the action executes in the global scope with the correct data.
+                const actionString = `performConfirmedDeletion('${subjectName.replace(/'/g, "\\'")}', '${itemId.replace(/'/g, "\\'")}')`;
+                
+                showInfoModal(
+                    'تأكيد الحذف', 
+                    message, 
+                    actionString, // Passing the raw string now
+                    'نعم، احذف', 
+                    true
+                );
             } else {
-                performDeletion();
+                // Immediate deletion path (not used in UI, but kept for consistency)
+                performConfirmedDeletion(subjectName, itemId);
             }
         };
 
-        // --- GENERIC INFO/CONFIRMATION MODAL ---
-
+        // 3. Updated showInfoModal to handle string action
         function showInfoModal(title, message, confirmAction = null, confirmText = 'OK', isDestructive = false) {
             const content = document.getElementById('modal-content');
 
@@ -1188,25 +1415,38 @@
             `;
 
             if (confirmAction) {
-                const confirmClass = isDestructive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'; // Changed confirmation button to green/red
+                const confirmClass = isDestructive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700';
+                
+                let onClickAction;
+                if (typeof confirmAction === 'string') {
+                    // FIX: If action is a string, use it directly (the string must be a global function call)
+                    onClickAction = confirmAction;
+                } else {
+                    // Original behavior for function object (still less safe, but kept for compatibility)
+                    onClickAction = `confirmActionWrapper(${confirmAction.toString()})`;
+                }
+
                 buttons = `
                     <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إلغاء</button>
-                    <button onclick="confirmActionWrapper(${confirmAction.toString()})" class="px-4 py-2 rounded-lg text-sm font-semibold text-white ${confirmClass} transition-colors">${confirmText}</button>
+                    <button onclick="${onClickAction}" class="px-4 py-2 rounded-lg text-sm font-semibold text-white ${confirmClass} transition-colors">${confirmText}</button>
                 `;
             }
 
             content.innerHTML = `
                 <h2 class="text-xl font-bold mb-4">${title}</h2>
-                <p class="mb-6 text-sm opacity-90">${message}</p>
+                <p class="mb-6 text-sm opacity-90">${message.replace(/\*\*/g, '<b>').replace(/\*\*/g, '</b>')}</p>
                 <div class="flex justify-start space-x-3 space-x-reverse">${buttons}</div>
             `;
             showModal();
         }
 
+        // Keeping confirmActionWrapper for backward compatibility, although the new deletion path bypasses it.
         window.confirmActionWrapper = function(func) {
             func(); // Execute the wrapped function
             // Note: The function itself is responsible for calling closeModal() if needed.
         }
+
+        // --- FIX END: Deletion logic refactor ---
 
         // --- ANTI-INSPECT / DEV TOOLS LOCK ---
 
