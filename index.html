@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title> فصل المتميزين</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Poppins font -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- Load Phosphor Icons for a modern look -->
+    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+    <!-- Load qrcode.js for QR code generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        /* Custom CSS for Dark Mode with NEW Green/Gold Theme */
+        :root {
+            --color-green: #00A693; /* Accent Green/Teal */
+            --color-gold: #FFDAB9; /* Light Gold/Peach Accent */
+            --color-gradient: linear-gradient(135deg, var(--color-green) 0%, var(--color-gold) 100%);
+        }
+        [data-theme="light"] {
+            --bg-color: #f7f9fc;
+            --text-color: #0D0D0D;
+            --card-bg: #ffffff;
+            --card-border: #e0e6f0;
+            --header-bg: linear-gradient(135deg, #004D40 0%, #00897B 100%);
+        }
+        [data-theme="dark"] {
+            --bg-color: #1a1a1a; /* Dark background */
+            --text-color: #F0F0F0;
+            --card-bg: #282828; /* Slightly lighter card */
+            --card-border: #444444;
+            --header-bg: linear-gradient(135deg, #101010 0%, #003328 100%); /* Dark to Deep Green/Black */
+        }
+        body {
+            font-family: 'Poppins', sans-serif;
+            transition: background-color 0.3s, color 0.3s;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+        .bg-gradient-primary {
+            background: var(--header-bg);
+        }
+        .text-gradient {
+            /* Use the new green/gold gradient for text */
+            background: linear-gradient(90deg, var(--color-green), var(--color-gold));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        /* Style for the Anti-Inspect block */
+        #anti-inspect-overlay {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(18, 18, 18, 0.95);
+            color: var(--text-color);
+            z-index: 10000;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            font-size: 1.5rem;
+            padding: 2rem;
+            line-height: 1.5;
+        }
+        .requirement-card {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            border: 1px solid var(--card-border);
+        }
+        .requirement-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+            border-color: var(--color-green); /* Hover accent */
+        }
+
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-color);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--color-green); /* Scrollbar accent */
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--color-gold);
+        }
+
+        /* Tailwind Animation Classes */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+        .animate-pulse {
+            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        /* Style for the QR code display */
+        #qrcode img {
+            margin: 0 auto;
+        }
+
+        /* Wave SVG Styling */
+        .wave-bottom {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 100%;
+            height: auto;
+            color: var(--bg-color); /* Matches body background */
+            z-index: 10;
+        }
+        .wave-top {
+             position: absolute;
+            top: 0;
+            right: 0;
+            width: 100%;
+            height: auto;
+            color: var(--bg-color); /* Matches body background */
+            transform: rotate(180deg);
+            z-index: 10;
+        }
+        .text-accent-green { color: var(--color-green); }
+        .text-accent-gold { color: var(--color-gold); }
+
+        /* Style for file upload progress */
+        #upload-progress-bar {
+            height: 8px;
+            background-color: var(--card-border);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        #upload-progress {
+            width: 0;
+            height: 100%;
+            background-color: var(--color-green);
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body data-theme="dark" class="dark">
+    <!-- Anti-Inspect/DevTools Lock Overlay -->
+    <div id="anti-inspect-overlay">
+        <p class="mb-4">
+            <i class="ph ph-lock-key text-5xl text-red-400"></i>
+        </p>
+        <h2 class="text-3xl font-bold mb-3">تم تفعيل قفل ميزة المسؤول</h2>
+        <p class="text-lg">تحظر طبقة ادارة الموقع في هذا التطبيق أدوات الفحص لمنع العبث أو فحص البيانات. يرجى إغلاق أدوات المطور للمتابعة.</p>
+    </div>
+
+    <div id="app" class="min-h-screen flex flex-col">
+
+        <!-- Header with Wave SVG -->
+        <header id="header" class="relative pb-16 pt-10 sm:pt-16 bg-gradient-primary text-white overflow-hidden">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-20">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h1 class="text-4xl sm:text-5xl font-extrabold tracking-tight">
+                             فصل المتميزين
+                        </h1>
+                        <p class="mt-2 text-lg sm:text-xl font-light opacity-90">
+                            مركز واحد لجميع تحديثات الصف — بسيط، آمن، ومنظم بجمالية.
+                        </p>
+                    </div>
+                    <div class="flex flex-col items-start space-y-3">
+                        <!-- QR Code Button -->
+                        <button id="qr-toggle" class="p-3 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30 transition-all focus:outline-none" onclick="showQrModal()">
+                            <i class="ph ph-qr-code text-2xl"></i>
+                        </button>
+                        <!-- Dark Mode Toggle -->
+                        <button id="mode-toggle" class="p-3 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30 transition-all focus:outline-none" onclick="toggleDarkMode()">
+                            <i id="mode-icon" class="ph ph-sun text-2xl"></i>
+                        </button>
+                        <!-- Admin Button -->
+                        <button id="admin-toggle" class="px-4 py-2 rounded-full bg-white text-gray-800 font-semibold hover:bg-gray-200 transition-colors focus:outline-none text-sm shadow-lg" onclick="showAdminLoginModal()">
+                            المسؤول
+                        </button>
+                    </div>
+                </div>
+                <!-- Completion Tracker Summary -->
+                <div id="completion-summary" class="mt-8 p-4 rounded-xl bg-black bg-opacity-50 border border-green-800 border-opacity-50 flex items-center justify-between text-sm sm:text-lg font-semibold shadow-inner">
+                    <p class="flex items-center">
+                        <i class="ph ph-chart-line-up text-green-400 text-2xl ml-3"></i>
+                        <span>إجمالي المهام المتبقية: <span id="remaining-count">0</span></span>
+                    </p>
+                    <p class="text-accent-gold flex items-center">
+                        <i class="ph ph-check-circle text-2xl ml-3"></i>
+                        <span>تم الإنجاز: <span id="completed-count">0</span> (<span id="completed-percent">0%</span>)</span>
+                    </p>
+                </div>
+            </div>
+            <!-- Wave SVG -->
+            <svg class="wave-bottom" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 320" aria-hidden="true">
+                <path fill="currentColor" fill-opacity="1" d="M0,192L48,197.3C96,203,192,213,288,208C384,203,480,181,576,170.7C672,160,768,160,864,176C960,192,1056,224,1152,213.3C1248,203,1344,149,1392,122.7L1440,96L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"></path>
+            </svg>
+        </header>
+
+        <!-- Main Content Area with Global Search -->
+        <main id="main-content" class="flex-grow max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-10">
+             <input type="text" id="global-search-input" oninput="renderApp()" placeholder="ابحث في جميع المتطلبات بالعنوان أو الوصف..." class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500 mb-8" style="background-color: var(--card-bg);" />
+        </main>
+
+        <!-- Footer -->
+        <footer class="relative pt-16 mt-10 bg-gradient-primary text-white overflow-hidden">
+            <!-- Wave SVG (Inverted for footer) -->
+            <svg class="wave-top" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 320" aria-hidden="true">
+                <path fill="currentColor" fill-opacity="1" d="M0,192L48,197.3C96,203,192,213,288,208C384,203,480,181,576,170.7C672,160,768,160,864,176C960,192,1056,224,1152,213.3C1248,203,1344,149,1392,122.7L1440,96L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"></path>
+            </svg>
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 relative z-20 text-center">
+                <p class="text-sm opacity-80">
+                    CRP v1.0 | معرف الوصول: <span id="user-id-display">جاري التحميل...</span>
+                </p>
+                <p class="text-xs opacity-70 mt-1">
+                    تم تطويره مع مراعاة البساطة والتنظيم.
+                </p>
+            </div>
+        </footer>
+
+        <!-- Generic Modal Structure (for Admin Login, Add/Edit, QR Code) -->
+        <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm hidden items-center justify-center z-50">
+            <div id="modal-content" class="p-6 rounded-xl shadow-2xl w-full max-w-md mx-4 transition-all scale-95 opacity-0 duration-300" style="background-color: var(--card-bg);">
+                <!-- Modal content will be injected here -->
+            </div>
+        </div>
+        
+        <!-- Loading Modal for Upload (Kept for consistency, although local upload is instant) -->
+        <div id="loading-modal-backdrop" class="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-sm hidden items-center justify-center z-[60]">
+            <div class="p-8 rounded-xl shadow-2xl bg-gray-800 text-white flex flex-col items-center">
+                <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-green-500"></div>
+                <p id="loading-message" class="mt-4 text-lg">جارٍ تحميل الملفات، يرجى الانتظار...</p>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Firebase Script Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Removed Firebase Storage imports: getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject
+
+        // --- GLOBAL CONFIG & INITIALIZATION ---
+        const ADMIN_PASS = "High-school$admin";
+        const FIREBASE_COLLECTION = "class_portal_data";
+        const FIREBASE_DOC_ID = "portal_config";
+        const SUBJECTS = [
+            "الرياضيات", "الفيزياء", "الكيمياء", "علوم الأرض",
+            "مصادر البحث والمعلومات", "التنمية المستدامة"
+        ];
+        // Local Storage Keys
+        const NEW_TAG_KEY = "crp_seen_items";
+        const COMPLETED_ITEMS_KEY = "crp_completed_items";
+        const THEME_KEY = "crp_theme";
+        const FILTER_KEY_PREFIX = "crp_filter_";
+        const ARCHIVE_KEY_PREFIX = "crp_archive_visible_";
+
+        // UPDATED: Final requirement types based on user requests
+        const TYPE_MAP = {
+            'homework': 'واجب منزلي',
+            'exam': 'اختبار', 
+            'research': 'بحث', 
+            'brochure': 'مطوية', 
+            'link': 'رابط خارجي', // Renamed for clarity
+            'file': 'ملف / صورة', // Renamed for clarity
+            'note': 'ملاحظة'
+        };
+
+        let db, auth; // Removed storage
+        let currentData = null;
+        let isDarkMode = true;
+        let isAdmin = false;
+        let currentUserId = 'anonymous';
+        let currentFilters = {}; // { subjectName: 'filterType' }
+        
+        // Map to store temporary Blob URLs for the current session (to be reused upon re-rendering)
+        let localFileUrls = new Map(); 
+
+        // Initial MVP Data Structure (Updated to reflect new types and file sharing concept)
+        const MVP_DATA = {
+            subjects: {
+                "الرياضيات": [
+                    {
+                        title: "واجب منزلي: ورقة عمل الجبر",
+                        description: "حل جميع التمارين في الصفحات 32–35.",
+                        due_date: "2025-10-30",
+                        type: "homework",
+                        file: "https://placehold.co/100x40/00A693/FFFFFF?text=Sheet", // Example file link
+                        pinned: true,
+                        id: crypto.randomUUID()
+                    },
+                     {
+                        title: "اختبار قصير: الدوال المثلثية",
+                        description: "الاستعداد للاختبار القصير في نهاية الأسبوع.",
+                        due_date: "2025-10-25", 
+                        type: "exam",
+                        file: "",
+                        pinned: false,
+                        id: crypto.randomUUID() + "-exam"
+                    },
+                    {
+                        title: "تقرير: نظرية الأوتار",
+                        description: "ملخص عن أهمية نظرية الأوتار في الفيزياء الحديثة.",
+                        due_date: "2024-10-15", // Past date for archive testing
+                        type: "research", 
+                        file: "",
+                        pinned: false,
+                        id: crypto.randomUUID() + "-old"
+                    }
+                ],
+                "الفيزياء": [
+                    {
+                        title: "تسليم البحث: الطاقة النووية",
+                        description: "تحميل البحث كمستند PDF قبل الموعد النهائي.",
+                        due_date: "2025-11-02",
+                        type: "research", 
+                        file: "https://placehold.co/100x40/00A693/FFFFFF?text=PDF_Doc", // Example file link
+                        pinned: false,
+                        id: crypto.randomUUID()
+                    },
+                    {
+                        title: "صورة مرجعية: طاقة الكويكبات",
+                        description: "صورة تم نشرها بواسطة ناسا كمصدر للمطوية.",
+                        due_date: "2025-11-15",
+                        type: "file", // Now handles files/photos
+                        file: "https://placehold.co/400x200/FFDAB9/000000?text=Reference+Image", // Example image link
+                        pinned: false,
+                        id: crypto.randomUUID() + "-brochure"
+                    }
+                ],
+                "الكيمياء": [],
+                "علوم الأرض": [],
+                "مصادر البحث والمعلومات": [],
+                "التنمية المستدامة": []
+            },
+            admin_pass: ADMIN_PASS
+        };
+
+        // Utility to get Firestore path for public data
+        function getFirestorePath(appId, collection, docId) {
+            return `/artifacts/${appId}/public/data/${collection}/${docId}`;
+        }
+
+        async function initApp() {
+            try {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+                if (!firebaseConfig || !firebaseConfig.apiKey) {
+                    console.error("Firebase configuration is missing or invalid.");
+                    document.getElementById('main-content').innerHTML = '<p class="text-center text-red-500">خطأ: إعدادات Firebase مفقودة. لا يمكن تحميل البيانات.</p>';
+                    return;
+                }
+
+                // Load theme preference
+                const savedTheme = localStorage.getItem(THEME_KEY);
+                isDarkMode = savedTheme === 'dark';
+                document.body.setAttribute('data-theme', savedTheme || 'dark');
+                document.body.classList.toggle('dark', isDarkMode);
+
+                const modeIcon = document.getElementById('mode-icon');
+                modeIcon.classList.replace(isDarkMode ? 'ph-moon' : 'ph-sun', isDarkMode ? 'ph-sun' : 'ph-moon');
+
+
+                // Load saved filters
+                SUBJECTS.forEach(subjectName => {
+                    const savedFilter = localStorage.getItem(FILTER_KEY_PREFIX + subjectName);
+                    if (savedFilter) {
+                        currentFilters[subjectName] = savedFilter;
+                    }
+                });
+
+
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Authenticate (use custom token if available, otherwise anonymous)
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                currentUserId = auth.currentUser?.uid || 'anonymous-user';
+                document.getElementById('user-id-display').textContent = currentUserId;
+
+                startFirestoreListener(appId);
+            } catch (error) {
+                console.error("Initialization Error:", error);
+                document.getElementById('main-content').innerHTML = '<p class="text-center text-red-500">حدث خطأ أثناء تهيئة التطبيق.</p>';
+            }
+        }
+
+        function startFirestoreListener(appId) {
+            const docRef = doc(db, getFirestorePath(appId, FIREBASE_COLLECTION, FIREBASE_DOC_ID));
+
+            onSnapshot(docRef, async (docSnap) => {
+                if (docSnap.exists()) {
+                    currentData = docSnap.data();
+                    console.log("Data loaded from Firestore:", currentData);
+                } else {
+                    console.log("No data found, initializing with MVP data.");
+                    currentData = MVP_DATA;
+                    // Attempt to create the initial document
+                    await setDoc(docRef, MVP_DATA).catch(e => console.error("Error setting initial document:", e));
+                }
+                renderApp();
+            }, (error) => {
+                console.error("Firestore Listener Error:", error);
+                document.getElementById('main-content').innerHTML = '<p class="text-center text-red-500">خطأ في جلب البيانات في الوقت الحقيقي.</p>';
+            });
+        }
+
+        // --- LOCAL STORAGE UTILITIES ---
+
+        function getSeenItems() {
+            try {
+                const stored = localStorage.getItem(NEW_TAG_KEY);
+                return stored ? new Set(JSON.parse(stored)) : new Set();
+            } catch (e) {
+                console.error("Error reading from localStorage (Seen):", e);
+                return new Set();
+            }
+        }
+
+        function markAllAsSeen(allRequirements) {
+            const seenItems = new Set();
+            allRequirements.forEach(item => seenItems.add(item.id));
+            try {
+                localStorage.setItem(NEW_TAG_KEY, JSON.stringify(Array.from(seenItems)));
+            } catch (e) {
+                console.error("Error writing to localStorage (Seen):", e);
+            }
+        }
+
+        function getCompletedItems() {
+            try {
+                const stored = localStorage.getItem(COMPLETED_ITEMS_KEY);
+                return stored ? new Set(JSON.parse(stored)) : new Set();
+            } catch (e) {
+                console.error("Error reading from localStorage (Completed):", e);
+                return new Set();
+            }
+        }
+
+        function toggleCompleted(itemId) {
+            const completedItems = getCompletedItems();
+            if (completedItems.has(itemId)) {
+                completedItems.delete(itemId);
+            } else {
+                completedItems.add(itemId);
+            }
+            try {
+                localStorage.setItem(COMPLETED_ITEMS_KEY, JSON.stringify(Array.from(completedItems)));
+            } catch (e) {
+                console.error("Error writing to localStorage (Completed):", e);
+            }
+            renderApp(); // Rerender to update counter and checkbox state
+        }
+
+        function isArchiveVisible(subjectName) {
+            const stored = localStorage.getItem(ARCHIVE_KEY_PREFIX + subjectName);
+            return stored === 'true';
+        }
+
+        window.toggleArchiveVisibility = function(subjectName) {
+            const isVisible = isArchiveVisible(subjectName);
+            localStorage.setItem(ARCHIVE_KEY_PREFIX + subjectName, isVisible ? 'false' : 'true');
+            renderApp();
+        }
+
+        // --- FILTERING LOGIC ---
+
+        window.setFilter = function(subjectName, filterType) {
+            if (currentFilters[subjectName] === filterType) {
+                delete currentFilters[subjectName]; // Toggle off
+                localStorage.removeItem(FILTER_KEY_PREFIX + subjectName);
+            } else {
+                currentFilters[subjectName] = filterType; // Set new filter
+                localStorage.setItem(FILTER_KEY_PREFIX + subjectName, filterType);
+            }
+            renderApp();
+        }
+
+        window.toggleCompleted = toggleCompleted;
+
+
+        // --- UI RENDERING FUNCTIONS ---
+
+        function getIconForType(type) {
+            // Updated icons/colors for the new types (green/gold theme)
+            switch (type) {
+                case 'homework': return `<i class="ph ph-note-pencil text-xl text-yellow-400"></i>`; // الواجبات
+                case 'exam': return `<i class="ph ph-book-open-text text-xl text-red-500"></i>`; // الاختبارات (Critical/Red)
+                case 'research': return `<i class="ph ph-magnifying-glass text-xl text-cyan-400"></i>`; // البحوث
+                case 'brochure': return `<i class="ph ph-article text-xl text-pink-400"></i>`; // المطويات
+                case 'link': return `<i class="ph ph-link text-xl text-blue-400"></i>`;
+                case 'file': return `<i class="ph ph-file-arrow-down text-xl text-green-400"></i>`;
+                case 'note': return `<i class="ph ph-info text-xl text-gray-400"></i>`;
+                default: return `<i class="ph ph-info text-xl text-gray-400"></i>`;
+            }
+        }
+
+        function isDuePast(dateString) {
+            if (!dateString) return false;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const dueDate = new Date(dateString);
+            dueDate.setHours(0, 0, 0, 0);
+            return dueDate < today;
+        }
+
+        function renderRequirementCard(subjectName, item, isArchived = false) {
+            const dueDate = item.due_date ? `يستحق: ${item.due_date}` : '';
+            // Get the displayed file name, handling local Blob URLs
+            const fileDisplayName = item.file && item.file.startsWith('blob:') ? 'ملف محلي' : (item.file || '');
+            const fileLink = item.file ? `<a href="${item.file}" target="_blank" class="text-xs text-green-500 hover:text-green-400 font-semibold truncate">${fileDisplayName}</a>` : '';
+
+            // Status Check
+            const completedItems = getCompletedItems();
+            const isCompleted = completedItems.has(item.id);
+            const cardOpacity = isCompleted && !isAdmin ? 'opacity-50' : '';
+            const isPast = isDuePast(item.due_date);
+
+            // Badges (using theme colors)
+            const seenItems = getSeenItems();
+            const isNew = !isAdmin && !isArchived && !seenItems.has(item.id);
+            const newBadge = isNew ? '<span class="mr-2 inline-flex items-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white animate-pulse"><i class="ph ph-sparkle ml-1"></i>جديد</span>' : '';
+            const pinBadge = item.pinned ? '<span class="mr-2 inline-flex items-center rounded-full bg-yellow-900 px-2 py-0.5 text-xs font-medium text-yellow-300"><i class="ph ph-push-pin ml-1"></i>مثبت</span>' : '';
+            const badges = `${newBadge} ${pinBadge}`;
+
+
+            let actionControls = '';
+            if (isAdmin) {
+                // Admin Controls (Edit/Delete)
+                actionControls = `
+                    <div class="mt-3 flex space-x-2 flex-row-reverse justify-end">
+                        <button onclick="showEditModal('${subjectName}', '${item.id}')" class="text-xs text-green-500 hover:text-green-400 font-medium">
+                            <i class="ph ph-pencil-simple-line ml-1"></i>تعديل
+                        </button>
+                        <button onclick="deleteRequirement('${subjectName}', '${item.id}', true)" class="text-xs text-gray-500 hover:text-gray-400 font-medium">
+                            <i class="ph ph-trash ml-1"></i>حذف
+                        </button>
+                    </div>
+                `;
+            } else {
+                // Student Controls (Completion Toggle)
+                actionControls = `
+                    <div class="mt-3 flex justify-start">
+                        <label class="flex items-center cursor-pointer text-sm font-medium text-green-400">
+                            <input type="checkbox" onchange="toggleCompleted('${item.id}')" ${isCompleted ? 'checked' : ''} class="form-checkbox h-5 w-5 text-green-500 border-gray-600 rounded focus:ring-green-500" style="margin-left: 0.5rem;">
+                            ${isCompleted ? 'تم الإنجاز' : 'وضع كمنجز'}
+                        </label>
+                    </div>
+                `;
+            }
+
+            // Highlighting past due date in red
+            const dueDateClass = isPast ? 'text-red-500' : 'text-gray-400';
+
+            return `
+                <div class="requirement-card p-4 rounded-xl transition-all ${cardOpacity}" style="background-color: var(--card-bg);">
+                    <div class="flex items-start justify-between">
+                        <div class="flex items-start">
+                            ${getIconForType(item.type)}
+                            <h3 class="mr-3 text-lg font-semibold">${item.title}</h3>
+                        </div>
+                        <div>
+                            ${badges}
+                        </div>
+                    </div>
+                    <p class="mt-2 text-sm opacity-70">${item.description}</p>
+                    <div class="mt-3 text-xs font-mono opacity-80 flex items-center justify-between">
+                        <p class="font-medium ${dueDateClass}">
+                            ${dueDate}
+                        </p>
+                        ${fileLink}
+                    </div>
+                    ${actionControls}
+                </div>
+            `;
+        }
+
+        function renderFilterButton(subjectName, filterType, label, icon) {
+            const isActive = currentFilters[subjectName] === filterType;
+            const baseClasses = "px-3 py-1 text-xs rounded-full transition-all flex items-center whitespace-nowrap";
+            // Filter buttons use the primary green accent
+            const activeClasses = "bg-green-600 text-white shadow-md hover:bg-green-700"; 
+            const inactiveClasses = "bg-gray-700 text-gray-200 hover:bg-gray-600";
+
+            return `
+                <button onclick="setFilter('${subjectName}', '${filterType}')" class="${baseClasses} ${isActive ? activeClasses : inactiveClasses}">
+                    <i class="${icon} ml-1"></i> ${label}
+                </button>
+            `;
+        }
+
+
+        function renderApp() {
+            if (!currentData) {
+                document.getElementById('main-content').innerHTML = '<p class="text-center py-10 text-xl font-medium text-gray-500">جاري تحميل بيانات الصف...</p>';
+                return;
+            }
+
+            // Get global search term
+            const globalSearchInput = document.getElementById('global-search-input');
+            const globalSearchTerm = globalSearchInput ? globalSearchInput.value.toLowerCase().trim() : '';
+
+            const content = document.getElementById('main-content');
+            let mainContentHTML = '';
+
+            const subjectKeys = SUBJECTS;
+            let allRequirementItems = [];
+            let totalTasks = 0;
+            let completedTasks = 0;
+
+            // --- 1. Calculate Total and Completed Tasks ---
+            subjectKeys.forEach(subjectName => {
+                const allRequirements = currentData.subjects[subjectName] || [];
+                totalTasks += allRequirements.length;
+                const completedItems = getCompletedItems();
+                allRequirements.forEach(item => {
+                    if (completedItems.has(item.id)) {
+                        completedTasks++;
+                    }
+                });
+            });
+
+            const remainingTasks = totalTasks - completedTasks;
+            const completedPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+            document.getElementById('remaining-count').textContent = remainingTasks;
+            document.getElementById('completed-count').textContent = completedTasks;
+            document.getElementById('completed-percent').textContent = completedPercent + '%';
+
+            // --- 2. Render Subjects ---
+            subjectKeys.forEach(subjectName => {
+                const allRequirements = currentData.subjects[subjectName] || [];
+
+                const currentFilter = currentFilters[subjectName];
+
+                // 2.1. Separate items into Current and Archived
+                let currentItems = [];
+                let archivedItems = [];
+
+                allRequirements.forEach(item => {
+                    if (isDuePast(item.due_date)) {
+                        archivedItems.push(item);
+                    } else {
+                        currentItems.push(item);
+                    }
+                });
+
+                // 2.2. Apply global search filter
+                const searchFilter = item => {
+                    if (!globalSearchTerm) return true;
+                    const title = item.title.toLowerCase();
+                    const description = item.description.toLowerCase();
+                    return title.includes(globalSearchTerm) || description.includes(globalSearchTerm);
+                };
+
+                currentItems = currentItems.filter(searchFilter);
+                archivedItems = archivedItems.filter(searchFilter);
+
+
+                // 2.3. Apply local (subject-specific) filtering to current items
+                let filteredItems = currentItems.filter(item => {
+                    if (!currentFilter) return true; // No filter
+                    if (currentFilter === 'homework' && item.type === 'homework') return true;
+                    if (currentFilter === 'exam' && item.type === 'exam') return true; // New Exam filter
+                    if (currentFilter === 'research' && item.type === 'research') return true; // New Research filter
+                    if (currentFilter === 'brochure' && item.type === 'brochure') return true; // New Brochure filter
+                    if (currentFilter === 'pinned' && item.pinned) return true;
+                    
+                    // Added: Always show links/files/notes if they have a file/link specified
+                    if ((currentFilter === 'link' && item.type === 'link') || 
+                        (currentFilter === 'file' && item.type === 'file')) return true;
+                        
+                    // Reset filter shows all standard item types if set to 'reset' but we use 'currentFilter' being empty for that
+                    if (['homework', 'exam', 'research', 'brochure', 'pinned', 'link', 'file'].includes(currentFilter)) return false;
+                        
+                    return true;
+                });
+
+                // 2.4. Sort current items
+                filteredItems.sort((a, b) => {
+                    if (a.pinned && !b.pinned) return -1;
+                    if (!a.pinned && b.pinned) return 1;
+                    if (a.due_date && b.due_date) {
+                        return new Date(a.due_date) - new Date(b.due_date);
+                    }
+                    return 0;
+                });
+
+                // 2.5. Sort archived items (most recent first)
+                archivedItems.sort((a, b) => {
+                    if (a.due_date && b.due_date) {
+                        return new Date(b.due_date) - new Date(a.due_date);
+                    }
+                    return 0;
+                });
+
+                // Collect all current items for the 'seen' tracker
+                filteredItems.forEach(item => allRequirementItems.push(item));
+
+                // UPDATED: Filter buttons list (added file/link explicit filters)
+                const filtersHtml = `
+                    <div class="flex gap-2 mt-4 overflow-x-auto pb-2">
+                        ${renderFilterButton(subjectName, 'homework', 'الواجبات', 'ph ph-note-pencil')}
+                        ${renderFilterButton(subjectName, 'exam', 'الاختبارات', 'ph ph-book-open-text')}
+                        ${renderFilterButton(subjectName, 'research', 'البحوث', 'ph ph-magnifying-glass')}
+                        ${renderFilterButton(subjectName, 'brochure', 'المطويات', 'ph ph-article')}
+                        ${renderFilterButton(subjectName, 'file', 'الملفات/الصور', 'ph ph-file-arrow-down')}
+                        ${renderFilterButton(subjectName, 'pinned', 'المثبتة', 'ph ph-push-pin')}
+                        ${currentFilter ? renderFilterButton(subjectName, 'reset', 'إعادة تعيين', 'ph ph-x-circle') : ''}
+                    </div>
+                `;
+
+                const currentItemsHtml = filteredItems.length > 0
+                    ? filteredItems.map(item => renderRequirementCard(subjectName, item, false)).join('')
+                    : `<p class="text-sm opacity-60 italic py-4">لا توجد متطلبات مطابقة لمعايير التصفية لـ ${subjectName}.</p>`;
+
+                let adminAddButton = '';
+                if (isAdmin) {
+                    adminAddButton = `
+                        <button onclick="showAddModal('${subjectName}')" class="text-sm text-green-500 hover:text-green-700 font-semibold focus:outline-none">
+                            <i class="ph ph-plus-circle ml-1"></i>إضافة جديد
+                        </button>
+                    `;
+                }
+
+                mainContentHTML += `
+                    <section class="mb-12">
+                        <div class="flex justify-between items-center mb-1 border-b pb-2" style="border-color: var(--card-border);">
+                            <h2 class="text-2xl font-bold text-gradient">${subjectName}</h2>
+                            ${adminAddButton}
+                        </div>
+                        ${filtersHtml}
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-4">
+                            ${currentItemsHtml}
+                        </div>
+                    </section>
+                `;
+
+                // Render Archive Section ONLY if there are archived items matching the search
+                if (archivedItems.length > 0) {
+                    const isVisible = isArchiveVisible(subjectName);
+                    const archiveHtml = archivedItems.map(item => renderRequirementCard(subjectName, item, true)).join('');
+                    
+                    const archiveContent = isVisible ? `
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            ${archiveHtml}
+                        </div>
+                    ` : '';
+
+                    const toggleButton = `
+                        <button onclick="toggleArchiveVisibility('${subjectName}')" class="text-xs font-semibold text-gray-400 hover:text-green-400 transition-colors flex items-center">
+                            <i class="ph ph-${isVisible ? 'caret-up' : 'caret-down'} ml-1"></i>
+                            ${isVisible ? 'إخفاء' : 'عرض'} الأرشيف (${archivedItems.length})
+                        </button>
+                    `;
+
+                    mainContentHTML += `
+                        <section class="mb-12 border-t pt-6" style="border-color: var(--card-border);">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-xl font-bold opacity-70 flex items-center text-gray-500">
+                                    <i class="ph ph-archive ml-2"></i> أرشيف ${subjectName}
+                                </h3>
+                                ${toggleButton}
+                            </div>
+                            ${archiveContent}
+                        </section>
+                    `;
+                }
+            });
+
+            // Update main content
+            content.innerHTML = globalSearchInput.outerHTML + mainContentHTML;
+
+
+            // Mark all current items as seen after rendering, only if not Admin and not searching
+            if (!isAdmin && !globalSearchTerm && allRequirementItems.length > 0) {
+                // Use a short delay to ensure the user registers the "New" flash
+                setTimeout(() => markAllAsSeen(allRequirementItems), 500);
+            }
+        }
+
+        // --- DARK MODE LOGIC ---
+
+        window.toggleDarkMode = function() {
+            isDarkMode = !isDarkMode;
+            const body = document.body;
+            const modeIcon = document.getElementById('mode-icon');
+            const theme = isDarkMode ? 'dark' : 'light';
+
+            body.setAttribute('data-theme', theme);
+            body.classList.toggle('dark', isDarkMode);
+            localStorage.setItem(THEME_KEY, theme);
+
+            if (isDarkMode) {
+                modeIcon.classList.replace('ph-moon', 'ph-sun');
+            } else {
+                modeIcon.classList.replace('ph-sun', 'ph-moon');
+            }
+        };
+
+        // --- QR CODE LOGIC ---
+
+        window.showQrModal = function() {
+            document.getElementById('modal-content').innerHTML = `
+                <h2 class="text-xl font-bold mb-4 text-center">رمز QR للوصول السريع</h2>
+                <p class="text-center mb-4 text-sm opacity-80">امسح الرمز ضوئيًا بهاتفك للوصول المباشر إلى هذه الصفحة.</p>
+                <div id="qrcode" class="p-4 bg-white rounded-lg shadow-inner w-48 h-48 mx-auto"></div>
+                <div class="mt-6 flex justify-center">
+                    <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-200 dark:hover:bg-gray-700">إغلاق</button>
+                </div>
+            `;
+            showModal();
+
+            // Generate QR Code after modal is visible
+            new QRCode(document.getElementById("qrcode"), {
+                text: window.location.href,
+                width: 160,
+                height: 160,
+                colorDark : "#00A693", // Use green accent color
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+        };
+
+
+        // --- MODAL CONTROLS ---
+
+        function showModal() {
+            const backdrop = document.getElementById('modal-backdrop');
+            const content = document.getElementById('modal-content');
+            backdrop.classList.remove('hidden');
+            backdrop.classList.add('flex');
+            // Animate in
+            setTimeout(() => {
+                content.classList.remove('scale-95', 'opacity-0');
+                content.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+
+        window.closeModal = function() {
+            const backdrop = document.getElementById('modal-backdrop');
+            const content = document.getElementById('modal-content');
+            // Animate out
+            content.classList.remove('scale-100', 'opacity-100');
+            content.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                backdrop.classList.remove('flex');
+                backdrop.classList.add('hidden');
+                document.getElementById('modal-content').innerHTML = '';
+            }, 300);
+        };
+        
+        // Show loading modal (Kept, but not actively used for instant local upload)
+        function showLoadingModal(message = 'جارٍ تحميل الملفات، يرجى الانتظار...') {
+            document.getElementById('loading-message').textContent = message;
+            document.getElementById('loading-modal-backdrop').classList.remove('hidden');
+            document.getElementById('loading-modal-backdrop').classList.add('flex');
+        }
+
+        // Hide loading modal
+        function hideLoadingModal() {
+            document.getElementById('loading-modal-backdrop').classList.remove('flex');
+            document.getElementById('loading-modal-backdrop').classList.add('hidden');
+        }
+
+
+        // --- ADMIN LOGIN LOGIC ---
+
+        window.showAdminLoginModal = function() {
+            if (isAdmin) {
+                // If already logged in, show a confirmation/logout
+                showInfoModal('وضع المسؤول', 'أنت مسجل حاليًا كمسؤول. للعودة إلى عرض الطالب، يرجى النقر على "تسجيل الخروج".', () => {
+                    isAdmin = false;
+                    renderApp();
+                    document.getElementById('admin-toggle').textContent = 'المسؤول';
+                    closeModal();
+                }, 'تسجيل الخروج');
+                return;
+            }
+
+            document.getElementById('modal-content').innerHTML = `
+                <h2 class="text-xl font-bold mb-4 text-center">تسجيل دخول المسؤول</h2>
+                <input type="password" id="admin-pass-input" placeholder="أدخل كلمة مرور المسؤول" class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500 mb-4" style="background-color: var(--bg-color);" />
+                <p id="admin-error" class="text-red-500 text-sm mb-4 hidden">كلمة المرور غير صحيحة. حاول مرة أخرى.</p>
+                <div class="flex justify-start space-x-3 space-x-reverse">
+                    <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إلغاء</button>
+                    <button onclick="attemptAdminLogin()" class="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors">دخول</button>
+                </div>
+            `;
+            showModal();
+        };
+
+        window.attemptAdminLogin = function() {
+            const input = document.getElementById('admin-pass-input').value;
+            const errorElement = document.getElementById('admin-error');
+
+            if (input === ADMIN_PASS) {
+                isAdmin = true;
+                closeModal();
+                renderApp();
+                document.getElementById('admin-toggle').textContent = 'المسؤول (مسجل الدخول)';
+            } else {
+                errorElement.textContent = "كلمة المرور غير صحيحة. حاول مرة أخرى.";
+                errorElement.classList.remove('hidden');
+            }
+        };
+
+        // --- ADMIN CRUD LOGIC (simplified) ---
+
+        function updateFirestore(updatedSubjects) {
+            if (!db) return console.error("Firestore not initialized.");
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const docRef = doc(db, getFirestorePath(appId, FIREBASE_COLLECTION, FIREBASE_DOC_ID));
+            const newConfig = { ...currentData, subjects: updatedSubjects };
+
+            setDoc(docRef, newConfig).catch(e => console.error("Error updating document:", e));
+        }
+        
+        // Helper function to clean item data before saving
+        function cleanItemData(item) {
+            const cleaned = {};
+            for (const key in item) {
+                if (item[key] === null || item[key] === undefined || item[key] === '') {
+                    // Skip empty fields, except for boolean flags like 'pinned'
+                    if (key === 'pinned') {
+                        cleaned[key] = false;
+                    } else if (key === 'file' || key === 'due_date' || key === 'description') {
+                        cleaned[key] = '';
+                    }
+                } else {
+                    cleaned[key] = item[key];
+                }
+            }
+            // Ensure essential non-empty fields exist
+            cleaned.title = cleaned.title || 'متطلب بدون عنوان';
+            cleaned.type = cleaned.type || 'note';
+            return cleaned;
+        }
+
+        window.showAddModal = function(subjectName) {
+            const item = {
+                title: '', description: '', due_date: '', type: 'homework', file: '', pinned: false, isNew: true, subjectName: subjectName
+            };
+            renderEditModal(item);
+        };
+
+        window.showEditModal = function(subjectName, itemId) {
+            // Find the current item data and pass it
+            const currentItem = currentData.subjects[subjectName].find(item => item.id === itemId);
+            if (currentItem) {
+                renderEditModal({ ...currentItem, isNew: false, subjectName: subjectName });
+            }
+        };
+
+        function renderEditModal(item) {
+            const typeOptions = Object.keys(TYPE_MAP).map(key => `<option value="${key}" ${key === item.type ? 'selected' : ''}>${TYPE_MAP[key]}</option>`).join('');
+            const subjectOptions = SUBJECTS.map(s => `<option value="${s}" ${s === item.subjectName ? 'selected' : ''}>${s}</option>`).join('');
+            
+            // Get file name for display if it's a local Blob URL
+            const currentFileName = item.file && item.file.startsWith('blob:') ? 'ملف محلي مُحمَّل (' + item.file.split('/').pop() + ')' : 
+                                  (item.file ? 'رابط ثابت' : '');
+
+            document.getElementById('modal-content').innerHTML = `
+                <h2 class="text-xl font-bold mb-4 text-center">${item.isNew ? 'إضافة متطلب جديد' : 'تعديل المتطلب'}</h2>
+                <form id="requirement-form" onsubmit="event.preventDefault(); saveRequirement('${item.id || ''}', ${item.isNew}, '${item.file || ''}')">
+
+                    <label for="modal-subject" class="block text-sm font-medium mb-1 mt-3">المادة</label>
+                    <select id="modal-subject" name="subjectName" required class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);">${subjectOptions}</select>
+
+                    <label for="modal-title" class="block text-sm font-medium mb-1 mt-3">العنوان</label>
+                    <input type="text" id="modal-title" name="title" value="${item.title || ''}" required class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);" />
+
+                    <label for="modal-description" class="block text-sm font-medium mb-1 mt-3">الوصف</label>
+                    <textarea id="modal-description" name="description" rows="2" required class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);">${item.description || ''}</textarea>
+
+                    <div class="flex space-x-4 flex-row-reverse space-x-reverse">
+                        <div class="flex-1">
+                            <label for="modal-type" class="block text-sm font-medium mb-1 mt-3">النوع</label>
+                            <select id="modal-type" name="type" required class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);">${typeOptions}</select>
+                        </div>
+                        <div class="flex-1">
+                            <label for="modal-date" class="block text-sm font-medium mb-1 mt-3">تاريخ الاستحقاق (اختياري)</label>
+                            <input type="date" id="modal-date" name="due_date" value="${item.due_date || ''}" class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);" />
+                        </div>
+                    </div>
+                    
+                    ${item.file ? `<p class="text-xs text-gray-500 mt-3">الملف الحالي: <span class="${item.file.startsWith('blob:') ? 'text-yellow-500' : 'text-green-500'}">${currentFileName}</span></p>` : ''}
+
+                    <label for="modal-link" class="block text-sm font-medium mb-1 mt-3">رابط خارجي (اختياري)</label>
+                    <input type="text" id="modal-link" name="fileLink" value="${item.file && !item.file.startsWith('blob:') ? item.file : ''}" placeholder="أدخل رابط PDF, ZIP, PNG, أو رابط خارجي ثابت..." class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);" />
+
+                    <label for="modal-file" class="block text-sm font-medium mb-1 mt-3">أو قم بتحميل ملف/صورة **محلي** (اختياري)</label>
+                    <input type="file" id="modal-file" name="file" class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500 file:ml-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100" style="background-color: var(--bg-color);" />
+                    
+                    <p class="text-xs text-yellow-600 mt-1">
+                        **تنبيه**: الملفات المحلية لن تعمل إذا تم إغلاق المتصفح أو إعادة تشغيله. يجب استخدام رابط خارجي ثابت.
+                    </p>
+
+                    <div class="mt-4 flex items-center justify-end">
+                        <label for="modal-pinned" class="mr-2 text-sm font-medium">تثبيت العنصر (يعرض في الأعلى)</label>
+                        <input type="checkbox" id="modal-pinned" name="pinned" ${item.pinned ? 'checked' : ''} class="w-4 h-4 text-green-600 border-gray-600 rounded focus:ring-green-500 dark:focus:ring-green-600 dark:ring-offset-gray-800 dark:bg-gray-700">
+                    </div>
+
+                    <div class="mt-6 flex justify-start space-x-3 space-x-reverse">
+                        <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إلغاء</button>
+                        <button type="submit" id="save-button" class="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors">حفظ</button>
+                    </div>
+                </form>
+            `;
+            showModal();
+        }
+
+
+        // Simplified local file handling (no external upload, no deletion logic)
+        async function handleLocalFileUpload(file) {
+            return new Promise((resolve) => {
+                if (file) {
+                    // Create temporary Blob URL
+                    const localUrl = URL.createObjectURL(file);
+                    resolve(localUrl);
+                } else {
+                    resolve('');
+                }
+            });
+        }
+
+
+        window.saveRequirement = async function(itemId, isNew, oldFileUrl) {
+            const form = document.getElementById('requirement-form');
+            const formData = new FormData(form);
+            let newItem = {};
+            const fileInput = document.getElementById('modal-file');
+            const file = fileInput.files[0];
+            
+            const finalItemId = isNew ? crypto.randomUUID() : itemId;
+            let newFileUrl = oldFileUrl || ''; 
+            
+            // 1. Process Form Data
+            for (const [key, value] of formData.entries()) {
+                if (key !== 'file') {
+                    if (key === 'pinned') {
+                        newItem[key] = true; 
+                    } else if (key === 'fileLink') {
+                        // External Link takes priority over old file or new local upload
+                        if (value) {
+                             newFileUrl = value;
+                        } else if (!oldFileUrl.startsWith('blob:')) {
+                             // User cleared the external link and the old file wasn't a blob, clear it
+                             newFileUrl = '';
+                        }
+                    } else {
+                        newItem[key] = value;
+                    }
+                }
+            }
+            newItem.pinned = !!newItem.pinned;
+
+            // 2. Handle Local File Upload (Instant)
+            if (file) {
+                 // Clean up previous blob URL if exists for this item
+                if (oldFileUrl.startsWith('blob:')) {
+                    URL.revokeObjectURL(oldFileUrl);
+                }
+                newFileUrl = await handleLocalFileUpload(file);
+            } 
+            
+            newItem.file = newFileUrl; // Assign the final file URL
+
+
+            // 3. Clean and Save to Firestore
+            newItem = cleanItemData(newItem);
+            
+            const currentSubjectName = formData.get('subjectName');
+            const updatedSubjects = JSON.parse(JSON.stringify(currentData.subjects));
+            
+            newItem.id = finalItemId;
+
+            if (isNew) {
+                // ADD
+                updatedSubjects[currentSubjectName] = updatedSubjects[currentSubjectName] || [];
+                updatedSubjects[currentSubjectName].push(newItem);
+            } else {
+                // EDIT (Logic for moving or updating item)
+                let itemFound = false;
+                for (const subj of SUBJECTS) {
+                    const index = updatedSubjects[subj].findIndex(item => item.id === finalItemId);
+                    if (index !== -1) {
+                        if (subj === currentSubjectName) {
+                            updatedSubjects[subj][index] = newItem;
+                        } else {
+                            updatedSubjects[subj].splice(index, 1);
+                            updatedSubjects[currentSubjectName].push(newItem);
+                        }
+                        itemFound = true;
+                        break;
+                    }
+                }
+                if (!itemFound) {
+                    updatedSubjects[currentSubjectName].push(newItem);
+                }
+            }
+
+            updateFirestore(updatedSubjects);
+            closeModal(); 
+        };
+
+
+        window.deleteRequirement = function(subjectName, itemId, shouldConfirm = false) {
+            
+            const performDeletion = async () => {
+                const updatedSubjects = JSON.parse(JSON.stringify(currentData.subjects));
+                const subjectItems = updatedSubjects[subjectName];
+                const index = subjectItems.findIndex(item => item.id === itemId);
+
+                if (index > -1) {
+                    const itemToDelete = subjectItems[index];
+                    
+                    // Cleanup local blob URL if it was used
+                    if (itemToDelete.file && itemToDelete.file.startsWith('blob:')) {
+                        URL.revokeObjectURL(itemToDelete.file);
+                    }
+                    
+                    // Remove item from Firestore data structure
+                    subjectItems.splice(index, 1);
+                    updateFirestore(updatedSubjects);
+                }
+                closeModal();
+            };
+            
+            if (shouldConfirm) {
+                 // Find the item to confirm deletion
+                const item = currentData.subjects[subjectName].find(i => i.id === itemId);
+                let message = `هل أنت متأكد من رغبتك في حذف المتطلب: **${item.title}**؟`;
+                if (item.file && item.file.startsWith('blob:')) {
+                    message += ` **سيتم إلغاء الرابط المحلي للملف المرفق.**`;
+                }
+                
+                showInfoModal('تأكيد الحذف', message, performDeletion, 'نعم، احذف', true);
+            } else {
+                performDeletion();
+            }
+        };
+
+        // --- GENERIC INFO/CONFIRMATION MODAL ---
+
+        function showInfoModal(title, message, confirmAction = null, confirmText = 'OK', isDestructive = false) {
+            const content = document.getElementById('modal-content');
+
+            let buttons = `
+                <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إغلاق</button>
+            `;
+
+            if (confirmAction) {
+                const confirmClass = isDestructive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'; // Changed confirmation button to green/red
+                buttons = `
+                    <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إلغاء</button>
+                    <button onclick="confirmActionWrapper(${confirmAction.toString()})" class="px-4 py-2 rounded-lg text-sm font-semibold text-white ${confirmClass} transition-colors">${confirmText}</button>
+                `;
+            }
+
+            content.innerHTML = `
+                <h2 class="text-xl font-bold mb-4">${title}</h2>
+                <p class="mb-6 text-sm opacity-90">${message}</p>
+                <div class="flex justify-start space-x-3 space-x-reverse">${buttons}</div>
+            `;
+            showModal();
+        }
+
+        window.confirmActionWrapper = function(func) {
+            func(); // Execute the wrapped function
+            // Note: The function itself is responsible for calling closeModal() if needed.
+        }
+
+        // --- ANTI-INSPECT / DEV TOOLS LOCK ---
+
+        function initDevToolsLock() {
+            const overlay = document.getElementById('anti-inspect-overlay');
+
+            // Simple check using console print time (a common trick)
+            const checkDevTools = () => {
+                const threshold = 160; // Milliseconds threshold
+                let i = 0;
+                const startTime = performance.now();
+                // eslint-disable-next-line no-debugger
+                debugger; // Intentional debugger to halt on DevTools open
+                const endTime = performance.now();
+
+                // If DevTools is open, the debugger line will cause a large time gap
+                if (endTime - startTime > threshold) {
+                    overlay.style.display = 'flex';
+                } else {
+                    overlay.style.display = 'none';
+                }
+            };
+
+            // Re-check periodically
+            setInterval(checkDevTools, 500);
+
+            // Hide the overlay if the user closes the DevTools
+            window.addEventListener('resize', () => {
+                 overlay.style.display = 'none';
+            });
+        }
+
+
+        // --- ENTRY POINT ---
+        window.onload = function() {
+            initDevToolsLock(); // Start anti-inspect feature
+            initApp();          // Initialize Firebase and data listener
+            // Theme setup is handled in initApp based on localStorage or default
+        };
+    </script>
+</body>
+</html>
