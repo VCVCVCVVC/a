@@ -179,17 +179,40 @@
         .toast.error { border-right: 4px solid var(--notify-error); }
         .toast.info { border-right: 4px solid var(--notify-info); }
 
-        /* Custom style for the File Preview Modal */
+        /* Custom style for the File Preview Modal - IMPROVEMENTS */
         #file-preview-content {
             max-height: 80vh;
             overflow-y: auto;
+            background-color: var(--card-bg); /* Use card background for consistency */
+            padding: 1rem;
+            border-radius: 8px;
+            display: flex; /* For centering content */
+            justify-content: center;
+            align-items: center;
+            flex-direction: column; /* Allow content to stack */
+            min-height: 100px; /* Minimum space for preview */
         }
         #file-preview-content img {
             max-width: 100%;
+            max-height: 70vh; /* Limit height for better fit */
+            width: auto;
             height: auto;
             border-radius: 8px;
-            display: block;
-            margin: 0 auto;
+            object-fit: contain;
+        }
+        /* New Progress Bar Styling */
+        #progress-bar-container {
+            height: 12px;
+            border-radius: 6px;
+            background-color: rgba(255, 255, 255, 0.2);
+            overflow: hidden;
+            width: 100%;
+        }
+        #progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #00A693, #34D399); /* Bright Green Gradient */
+            transition: width 0.5s ease-in-out;
+            box-shadow: 0 0 5px rgba(0, 166, 147, 0.5);
         }
         
     </style>
@@ -235,18 +258,25 @@
                 </div>
                 <!-- Completion Tracker Summary -->
                 <div id="completion-summary" class="mt-8 p-4 rounded-xl bg-black bg-opacity-50 border border-green-800 border-opacity-50 flex flex-col sm:flex-row items-center justify-between text-sm sm:text-lg font-semibold shadow-inner">
-                    <div class="flex items-center w-full sm:w-auto mb-2 sm:mb-0">
-                        <p class="flex items-center">
-                            <i class="ph ph-chart-line-up text-green-400 text-2xl ml-3"></i>
-                            <span>إجمالي المهام المتبقية: <span id="remaining-count">0</span></span>
-                        </p>
-                        <p class="text-accent-gold flex items-center mr-6">
-                            <i class="ph ph-check-circle text-2xl ml-3"></i>
-                            <span>تم الإنجاز: <span id="completed-count">0</span> (<span id="completed-percent">0%</span>)</span>
-                        </p>
+                    <div class="flex flex-col w-full sm:w-auto mb-2 sm:mb-0">
+                        <div class="flex items-center w-full mb-2">
+                             <p class="flex items-center">
+                                <i class="ph ph-chart-line-up text-green-400 text-2xl ml-3"></i>
+                                <span>إجمالي المهام المتبقية: <span id="remaining-count">0</span></span>
+                            </p>
+                            <p class="text-accent-gold flex items-center mr-6">
+                                <i class="ph ph-check-circle text-2xl ml-3"></i>
+                                <span>تم الإنجاز: <span id="completed-count">0</span> (<span id="completed-percent">0%</span>)</span>
+                            </p>
+                        </div>
+                        <!-- NEW: Progress Bar -->
+                        <div id="progress-bar-container">
+                            <div id="progress-bar" style="width: 0%;"></div>
+                        </div>
                     </div>
-                    <!-- New: Global Archive Toggle and Motivational Message -->
-                    <div class="flex items-center justify-between w-full sm:w-auto">
+                    
+                    <!-- Global Archive Toggle and Motivational Message -->
+                    <div class="flex items-center justify-between w-full sm:w-auto mt-4 sm:mt-0 sm:mr-4">
                         <p id="motivational-message" class="text-xs sm:text-sm font-medium italic"></p>
                         <button id="global-archive-toggle" onclick="toggleGlobalArchive()" class="px-3 py-1 rounded-full text-xs font-semibold bg-white bg-opacity-20 hover:bg-opacity-30 transition-colors ml-4 whitespace-nowrap">
                             إخفاء الأرشيفات
@@ -266,7 +296,7 @@
 
         <!-- Main Content Area with Global Search -->
         <main id="main-content" class="flex-grow max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-10">
-             <input type="text" id="global-search-input" oninput="renderApp()" placeholder="ابحث في جميع المتطلبات بالعنوان أو الوصف..." class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500 mb-8" style="background-color: var(--card-bg);" />
+             <input type="text" id="global-search-input" oninput="handleSearchInput()" placeholder="ابحث في جميع المتطلبات بالعنوان أو الوصف..." class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500 mb-8" style="background-color: var(--card-bg);" />
         </main>
 
         <!-- Footer -->
@@ -277,10 +307,11 @@
             </svg>
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 relative z-20 text-center">
                 <p class="text-sm opacity-80">
-                    CS v1.0  <span id="user-id-display"></span>
+                    <span class="mr-4">CS v1.0</span>
+                    <span id="last-updated-display" class="mr-4"></span>
                 </p>
                 <p class="text-xs opacity-70 mt-1">
-                    تم تطويره من قبل زياد
+                    تم تطويره من قبل زياد | حالة الإنجاز النهائي: <span id="footer-completion-status">0%</span>
                 </p>
             </div>
         </footer>
@@ -292,11 +323,12 @@
             </div>
         </div>
         
-        <!-- Loading Modal for Upload (Kept for consistency, although local upload is instant) -->
+        <!-- Loading Modal for JSONBin Fetch -->
         <div id="loading-modal-backdrop" class="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-sm hidden items-center justify-center z-[60]">
             <div class="p-8 rounded-xl shadow-2xl bg-gray-800 text-white flex flex-col items-center">
-                <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-green-500"></div>
-                <p id="loading-message" class="mt-4 text-lg">جارٍ تحميل الملفات، يرجى الانتظار...</p>
+                <!-- NEW: Simple Pulsing Loader for Data Fetch -->
+                <div class="w-6 h-6 rounded-full bg-green-500 animate-pulse"></div>
+                <p id="loading-message" class="mt-4 text-lg">جارٍ جلب البيانات من الخادم...</p>
             </div>
         </div>
 
@@ -309,10 +341,9 @@
         // --- GLOBAL CONFIG & INITIALIZATION ---
         const ADMIN_PASS = "High-school$admin";
         
-        // --- JSONBIN.IO CONFIGURATION (MUST BE UPDATED BY USER) ---
-        // BIN ID provided by the user: 68fa19f543b1c97be97a746a
-        const JSONBIN_ID = "68fa19f543b1c97be97a746a"; // <--- UPDATED!
-        const JSONBIN_SECRET_KEY = "$2a$10$OgesEl/ryBSJSZP6gf4Z3ecX20iq2yJoA6tEraNsO/UvPGhG1.29S"; // X-Master-Key provided by the user
+        // --- JSONBIN.IO CONFIGURATION (User provided data) ---
+        const JSONBIN_ID = "68fa19f543b1c97be97a746a"; // <--- ADDED!
+        const JSONBIN_SECRET_KEY = "$2a$10$OgesEl/ryBSJSZP6gf4Z3ecX20iq2yJoA6tEraNsO/UvPGhG1.29S"; // <--- ADDED!
         const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
 
         const POLLING_INTERVAL = 5000; // Check for updates every 5 seconds (to simulate real-time)
@@ -352,8 +383,15 @@
         
         // Map to store temporary Blob URLs for the current session (to be reused upon re-rendering)
         let localFileUrls = new Map(); 
+        
+        // NEW: Cache/Polling variables
+        let lastKnownDataHash = null;
+        let isInitialLoad = true;
+        let lastUpdateTime = null;
+        let searchTimeout = null;
+        const DEBOUNCE_DELAY = 300; // Delay for search input
 
-        // Initial MVP Data Structure (Matching the selected canvas data for fallback)
+        // Initial MVP Data Structure (Matching the selected canvas data for fallback) - UPDATED PLACEHOLDERS
         const MVP_DATA = {
             "subjects": {
                 "الرياضيات": [
@@ -362,10 +400,11 @@
                     "description": "حل جميع التمارين في الصفحات 32–35.",
                     "due_date": "2025-10-30",
                     "type": "homework",
-                    "file": "https://placehold.co/100x40/00A693/FFFFFF?text=Sheet",
+                    // UPDATED: Larger, clearer placeholder
+                    "file": "https://placehold.co/600x400/00A693/FFFFFF?text=Homework+Sheet", 
                     "pinned": true,
                     "id": "math-1",
-                    "file_display_name": "ورقة عمل الجبر" // NEW FIELD added for consistency
+                    "file_display_name": "ورقة عمل الجبر (رابط)" // NEW FIELD added for consistency
                   },
                   {
                     "title": "اختبار قصير: الدوال المثلثية",
@@ -404,10 +443,11 @@
                     "description": "صورة تم نشرها بواسطة ناسا كمصدر للمطوية.",
                     "due_date": "2025-11-15",
                     "type": "file",
-                    "file": "https://placehold.co/400x200/FFDAB9/000000?text=Reference+Image",
+                    // UPDATED: Larger, clearer placeholder
+                    "file": "https://placehold.co/800x400/FFDAB9/0D0D0D?text=Space+Reference+Image", 
                     "pinned": false,
                     "id": "physics-2",
-                    "file_display_name": "صورة الكويكب" // NEW FIELD added for consistency
+                    "file_display_name": "صورة الكويكب (مرجع)" // NEW FIELD added for consistency
                   }
                 ],
                 "الكيمياء": [],
@@ -422,25 +462,34 @@
         };
 
         // --- JSONBIN UTILITIES ---
+        
+        // Simple hash function for quick data comparison (NEW: Cache)
+        function hashData(data) {
+             return JSON.stringify(data).length; // Simple length check as a quick hash
+        }
 
         async function fetchJsonBinData() {
             if (JSONBIN_ID === "YOUR_JSONBIN_ID" || JSONBIN_SECRET_KEY === "") {
                 console.error("JSONBIN_ID or Secret Key is not set. Using MVP data.");
-                currentData = MVP_DATA;
-                // Sync SUBJECTS array based on MVP data keys
-                SUBJECTS = Object.keys(MVP_DATA.subjects);
-                // Since this runs in a loop, only render on the first run if we use fallback
-                if (!document.getElementById('remaining-count').textContent) { 
+                if (isInitialLoad) {
+                    currentData = MVP_DATA;
+                    SUBJECTS = Object.keys(MVP_DATA.subjects);
                     renderApp(); 
+                    isInitialLoad = false;
                 }
                 return;
             }
             
+            if (isInitialLoad) {
+                showLoadingModal('جارٍ جلب البيانات من الخادم...');
+            }
+
             try {
                 const response = await fetch(JSONBIN_URL + '/latest', {
                     headers: {
                         'X-Master-Key': JSONBIN_SECRET_KEY,
-                        'X-Bin-Meta': 'false' // Get raw data, not metadata
+                        'X-Bin-Meta': 'false', // Get raw data, not metadata
+                        // NEW: Conditional header to reduce load if data hasn't changed (optional for JSONBin)
                     }
                 });
                 
@@ -449,31 +498,42 @@
                 }
                 
                 const data = await response.json();
+                const dataHash = hashData(data);
+                
+                // NEW: Check cache status
+                if (dataHash === lastKnownDataHash && !isInitialLoad) {
+                    // Data hasn't changed, skip rendering
+                    return;
+                }
+                
+                lastKnownDataHash = dataHash;
+                lastUpdateTime = new Date().toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' });
+
                 currentData = data;
-                // Sync SUBJECTS array with the keys from the fetched data
                 SUBJECTS = Object.keys(currentData.subjects);
                 
                 // Ensure every item has a file_display_name (fallback/migration)
                 for (const subject in currentData.subjects) {
                     currentData.subjects[subject] = currentData.subjects[subject].map(item => {
                         if (item.file && !item.file_display_name) {
-                            // Fallback if the field is missing
                             const info = getFileDisplayInfo(item.file);
                             item.file_display_name = info.displayName || 'ملف مرفق';
                         }
                         return item;
                     });
                 }
-
-                // console.log("Data loaded from JSONBin:", currentData); // Keep quiet for production
+                
             } catch (error) {
-                console.error("JSONBin Fetch Error (using MVP data as fallback):", error);
-                // Fallback to local MVP data if fetch fails
-                if (!currentData) { // Only set fallback if no data loaded previously
+                console.error("JSONBin Fetch Error (using previous/MVP data as fallback):", error);
+                if (!currentData) { 
                     currentData = MVP_DATA;
                     SUBJECTS = Object.keys(MVP_DATA.subjects);
                 }
             } finally {
+                if (isInitialLoad) {
+                    hideLoadingModal();
+                    isInitialLoad = false;
+                }
                 renderApp();
             }
         }
@@ -491,7 +551,6 @@
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Master-Key': JSONBIN_SECRET_KEY,
-                        // Allow updates only via the master key
                     },
                     body: JSON.stringify(data)
                 });
@@ -500,9 +559,12 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
+                // Update hash and time locally immediately after successful push (NEW: Cache)
+                lastKnownDataHash = hashData(data);
+                lastUpdateTime = new Date().toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' });
+                
                 showNotification("تم حفظ البيانات بنجاح.", "success");
-                // Success, the next polling cycle will pick up the change
-                // console.log("Data successfully updated on JSONBin."); // Keep quiet
+                renderApp(); // Force re-render after successful push
             } catch (error) {
                 console.error("JSONBin Update Error:", error);
                 showNotification("فشل حفظ البيانات. يرجى التحقق من المفتاح السري ومعرف البين.", "error");
@@ -655,6 +717,12 @@
 
         window.toggleCompleted = toggleCompleted;
         window.performConfirmedDeletion = performConfirmedDeletion; // Make global for string execution
+        
+        // NEW: Debounced search handler
+        window.handleSearchInput = function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(renderApp, DEBOUNCE_DELAY);
+        }
 
 
         // --- UI RENDERING FUNCTIONS ---
@@ -699,6 +767,17 @@
             dueDate.setHours(0, 0, 0, 0);
             return dueDate < today;
         }
+        
+        // NEW: Function to check if due date is imminent (within 48 hours)
+        function isDueUrgent(dateString) {
+            if (!dateString) return false;
+            const today = new Date();
+            const dueDate = new Date(dateString);
+            const diffTime = dueDate.getTime() - today.getTime();
+            // Check if due date is future and within 48 hours (2 days * 24h * 60m * 60s * 1000ms)
+            return diffTime > 0 && diffTime < (2 * 24 * 60 * 60 * 1000);
+        }
+
 
         function renderRequirementCard(subjectName, item, isArchived = false) {
             const dueDate = item.due_date ? `يستحق: ${item.due_date}` : '';
@@ -729,8 +808,9 @@
             // Badges (using theme colors)
             const seenItems = getSeenItems();
             const isNew = !isAdmin && !isArchived && !seenItems.has(item.id);
+            // NEW: Pin badge uses stronger yellow color
+            const pinBadge = item.pinned ? '<span class="mr-2 inline-flex items-center rounded-full bg-yellow-600 px-2 py-0.5 text-xs font-medium text-white shadow-md"><i class="ph ph-push-pin-fill ml-1"></i>مثبت</span>' : '';
             const newBadge = isNew ? '<span class="mr-2 inline-flex items-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white animate-pulse"><i class="ph ph-sparkle ml-1"></i>جديد</span>' : '';
-            const pinBadge = item.pinned ? '<span class="mr-2 inline-flex items-center rounded-full bg-yellow-900 px-2 py-0.5 text-xs font-medium text-yellow-300"><i class="ph ph-push-pin ml-1"></i>مثبت</span>' : '';
             const badges = `${newBadge} ${pinBadge}`;
 
 
@@ -759,8 +839,16 @@
                 `;
             }
 
-            // Highlighting past due date in red
-            const dueDateClass = isPast ? 'text-red-500' : 'text-gray-400';
+            // Highlighting based on status
+            let dueDateClass = 'text-gray-400';
+            if (isPast) {
+                 dueDateClass = 'text-red-500';
+            } else if (isDueUrgent(item.due_date) && !isArchived) { // NEW: Urgent
+                 dueDateClass = 'text-yellow-500 font-bold'; 
+            } else if (isNew && !isArchived) { 
+                 // NEW: Highlight due date in green if it's a "New" item
+                 dueDateClass = 'text-green-400 font-bold'; 
+            }
 
             return `
                 <div class="requirement-card p-4 rounded-xl transition-all ${cardOpacity}" style="background-color: var(--card-bg);">
@@ -785,7 +873,7 @@
             `;
         }
         
-        // NEW: File Preview Modal Function
+        // NEW: File Preview Modal Function - IMPROVED
         window.showFilePreviewModal = function(subjectName, itemId) {
              const subjectItems = currentData.subjects[subjectName];
              const item = subjectItems ? subjectItems.find(i => i.id === itemId) : null;
@@ -804,11 +892,12 @@
              let buttonText = 'فتح الرابط الخارجي';
              
              if (isImage) {
-                 // Image preview
-                 previewContent = `<img src="${fileUrl}" alt="${fileDisplayName}" class="max-w-full h-auto object-contain mx-auto" onerror="this.onerror=null;this.src='https://placehold.co/400x200/FF0000/FFFFFF?text=تعذر عرض الصورة'">`;
+                 // Image preview (IMPROVED: uses the updated CSS for centering and resizing)
+                 previewContent = `<img src="${fileUrl}" alt="${fileDisplayName}" onerror="this.onerror=null;this.src='https://placehold.co/400x200/FF0000/FFFFFF?text=تعذر عرض الصورة'">`;
+                 buttonText = 'عرض الصورة في نافذة جديدة';
              } else if (isLocal) {
                   // Cannot preview local blobs that aren't images well, fallback to warning
-                  previewContent = `<p class="text-yellow-500 text-center py-4"><b>تنبيه:</b> هذا ملف محلي (Blob) ولا يمكن عرضه مباشرة في هذه النافذة. يجب تحميله أولاً.</p>`;
+                  previewContent = `<p class="text-yellow-500 text-center py-4"><b>تنبيه:</b> هذا ملف محلي لا يمكن عرضه مباشرة في هذه النافذة. يجب تحميله أولاً.</p>`;
                   buttonText = 'تحميل الملف المحلي';
              } else {
                  // Link or Document (PDF, Word, etc.)
@@ -852,6 +941,29 @@
                 </button>
             `;
         }
+        
+        // NEW: Function to update Admin toggle UI (separated for cleanliness)
+        function updateAdminUI() {
+             const adminToggle = document.getElementById('admin-toggle');
+             if (adminToggle) {
+                 if (isAdmin) {
+                     adminToggle.innerHTML = '<i class="ph ph-sign-out text-base ml-1"></i> خروج المسؤول';
+                     adminToggle.classList.replace('text-gray-800', 'text-white');
+                     adminToggle.classList.replace('bg-white', 'bg-red-600');
+                     adminToggle.classList.replace('hover:bg-gray-200', 'hover:bg-red-700');
+                 } else {
+                     adminToggle.innerHTML = 'المسؤول';
+                     adminToggle.classList.replace('text-white', 'text-gray-800');
+                     adminToggle.classList.replace('bg-red-600', 'bg-white');
+                     adminToggle.classList.replace('hover:bg-red-700', 'hover:bg-gray-200');
+                 }
+            }
+            // Toggle visibility of the "Add Subject" button based on isAdmin state
+            const addSubjectButton = document.getElementById('add-subject-button');
+            if (addSubjectButton) {
+                addSubjectButton.classList.toggle('hidden', !isAdmin);
+            }
+        }
 
 
         function renderApp() {
@@ -860,11 +972,7 @@
                 return;
             }
             
-            // Toggle visibility of the "Add Subject" button based on isAdmin state
-            const addSubjectButton = document.getElementById('add-subject-button');
-            if (addSubjectButton) {
-                addSubjectButton.classList.toggle('hidden', !isAdmin);
-            }
+            updateAdminUI(); // Update Admin button status
 
             // Get global search term
             const globalSearchInput = document.getElementById('global-search-input');
@@ -877,6 +985,7 @@
             let allRequirementItems = [];
             let totalTasks = 0;
             let completedTasks = 0;
+            
 
             // --- 1. Calculate Total and Completed Tasks ---
             subjectKeys.forEach(subjectName => {
@@ -897,6 +1006,12 @@
             document.getElementById('completed-count').textContent = completedTasks;
             document.getElementById('completed-percent').textContent = completedPercent + '%';
             
+            // NEW: Update progress bar style
+            document.getElementById('progress-bar').style.width = `${completedPercent}%`;
+            // NEW: Update Footer Status
+            document.getElementById('footer-completion-status').textContent = `${completedPercent}%`;
+            document.getElementById('last-updated-display').textContent = lastUpdateTime ? `آخر تحديث: ${lastUpdateTime}` : '';
+
             // NEW: Update motivational message
             const motivationalMessage = document.getElementById('motivational-message');
             if (motivationalMessage) {
@@ -1023,7 +1138,7 @@
                 // Show section only if there are items or admin can add
                 if (filteredItems.length > 0 || isAdmin || archivedItems.length > 0) {
                     mainContentHTML += `
-                        <section class="mb-12">
+                        <section class="mb-12" id="subject-${subjectName.replace(/\s/g, '-')}">
                             <div class="flex justify-between items-center mb-1 border-b pb-2" style="border-color: var(--card-border);">
                                 <h2 class="text-2xl font-bold text-gradient">${subjectName}</h2>
                                 ${adminAddButton}
@@ -1161,7 +1276,7 @@
         };
         
         // Show loading modal (Kept for consistency)
-        function showLoadingModal(message = 'جارٍ تحميل الملفات، يرجى الانتظار...') {
+        function showLoadingModal(message = 'جارٍ جلب البيانات من الخادم...') {
             document.getElementById('loading-message').textContent = message;
             document.getElementById('loading-modal-backdrop').classList.remove('hidden');
             document.getElementById('loading-modal-backdrop').classList.add('flex');
@@ -1237,12 +1352,12 @@
         window.attemptAdminLogin = function() {
             const input = document.getElementById('admin-pass-input').value;
             const errorElement = document.getElementById('admin-error');
-
+            
             if (input === ADMIN_PASS) {
                 isAdmin = true;
                 closeModal();
+                updateAdminUI(); // Update UI status immediately
                 renderApp();
-                document.getElementById('admin-toggle').textContent = 'المسؤول (مسجل الدخول)';
                 showNotification('تم تسجيل الدخول بنجاح كمسؤول.', 'success');
             } else {
                 errorElement.textContent = "كلمة المرور غير صحيحة. حاول مرة أخرى.";
@@ -1253,11 +1368,47 @@
         
         // NEW: Admin Settings Modal (for Logout and DevTools Lock Toggle)
         window.showAdminSettingsModal = function() {
+             if (!isAdmin) return showAdminLoginModal(); // Safety check
+
              const isLockEnabled = localStorage.getItem(DEV_LOCK_KEY) !== 'false';
              
+             // Dynamic buttons for deleting subjects
+             let deleteSubjectButtons = '';
+             SUBJECTS.forEach(subjectName => {
+                 const hasItems = currentData.subjects[subjectName] && currentData.subjects[subjectName].length > 0;
+                 // NEW: Only show delete button for non-empty subjects OR if explicitly allowed
+                 if (hasItems) { 
+                     const itemWarning = ` (${currentData.subjects[subjectName].length} متطلبات)`;
+                     const actionString = `confirmSubjectDeletion('${subjectName.replace(/'/g, "\\'")}', ${hasItems})`;
+
+                     deleteSubjectButtons += `
+                        <div class="flex items-center justify-between p-3 rounded-lg border" style="border-color: var(--card-border);">
+                            <span class="text-sm font-medium">${subjectName}</span>
+                            <button onclick="${actionString}" class="px-3 py-1 rounded-full text-xs font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors">
+                                <i class="ph ph-trash ml-1"></i> حذف المادة ${itemWarning}
+                            </button>
+                        </div>
+                     `;
+                 }
+             });
+             
+             if (!deleteSubjectButtons) {
+                 deleteSubjectButtons = `<p class="text-xs opacity-70 italic text-center py-2 text-gray-400">لا توجد مواد قابلة للحذف حالياً.</p>`;
+             }
+
+
              document.getElementById('modal-content').innerHTML = `
                 <h2 class="text-xl font-bold mb-4 text-center">إعدادات المسؤول</h2>
                 <div class="space-y-4">
+                    <!-- Delete Subject Section -->
+                    <div class="p-3 border rounded-lg" style="border-color: var(--card-border);">
+                        <h3 class="text-base font-semibold text-red-400 mb-2">إدارة وحذف المواد</h3>
+                        <p class="text-xs opacity-70 mb-3">حدد المادة لحذفها بشكل دائم. **لا يمكن التراجع عن هذا الإجراء.** (يتم عرض المواد التي تحتوي على متطلبات فقط)</p>
+                        <div class="space-y-2 max-h-48 overflow-y-auto">
+                            ${deleteSubjectButtons}
+                        </div>
+                    </div>
+                    
                     <!-- DevTools Lock Toggle -->
                     <div class="flex items-center justify-between p-3 rounded-lg border" style="border-color: var(--card-border);">
                         <label class="text-sm font-medium">قفل وضع المطور (DevTools)</label>
@@ -1277,11 +1428,74 @@
             `;
             showModal();
         };
+
+        window.confirmSubjectDeletion = function(subjectName, hasItems) {
+            closeModal(); // Close Admin Settings modal first
+            
+            const currentItems = currentData.subjects[subjectName];
+            // NEW: Stronger check for un-archived items
+            const unarchivedCount = currentItems.filter(item => !isDuePast(item.due_date)).length; 
+
+            let message = `هل أنت متأكد تماماً من حذف المادة **${subjectName}**؟`;
+            if (unarchivedCount > 0) {
+                 message += ` **تحذير: يوجد ${unarchivedCount} متطلب (نشط/غير منجز) سيتم حذفه بشكل دائم.**`;
+            } else if (hasItems) {
+                message += ` **سيتم حذف ${currentItems.length} متطلب (مؤرشف/منجز) مرتبط بهذه المادة بشكل دائم.**`;
+            } else {
+                 message += ` المادة فارغة حالياً.`;
+            }
+            message += ` لا يمكن التراجع عن هذا الإجراء.`;
+
+            const actionString = `performSubjectDeletion('${subjectName.replace(/'/g, "\\'")}')`;
+            
+            // Show new confirmation modal
+            showInfoModal(
+                'تأكيد حذف المادة', 
+                message, 
+                actionString, 
+                'نعم، احذف المادة', 
+                true
+            );
+        };
+        
+        window.performSubjectDeletion = function(subjectName) {
+            if (!isAdmin) {
+                showNotification("غير مصرح لك بحذف المواد.", 'error');
+                closeModal();
+                return;
+            }
+            
+            // Remove subject from global list
+            SUBJECTS = SUBJECTS.filter(s => s !== subjectName);
+
+            // Remove subject from data structure
+            const updatedSubjects = JSON.parse(JSON.stringify(currentData.subjects));
+            if (updatedSubjects[subjectName]) {
+                 // Clean up any local blob URLs associated with this subject's items
+                 updatedSubjects[subjectName].forEach(item => {
+                      if (item.file && item.file.startsWith('blob:')) {
+                            URL.revokeObjectURL(item.file);
+                      }
+                 });
+                 
+                 delete updatedSubjects[subjectName];
+            }
+            
+            // Update local and remote data
+            updateData(updatedSubjects);
+            
+            showNotification(`تم حذف المادة: ${subjectName} بنجاح.`, 'success');
+            closeModal();
+            renderApp(); // Re-render the app to reflect the deleted subject
+            // Re-open Admin Settings modal if user wants to delete more
+            setTimeout(showAdminSettingsModal, 500);
+        }
+
         
         window.performAdminLogout = function() {
              isAdmin = false;
+             updateAdminUI(); // Update UI status immediately
              renderApp();
-             document.getElementById('admin-toggle').textContent = 'المسؤول';
              closeModal();
              showNotification('تم تسجيل الخروج من وضع المسؤول.', 'info');
         }
@@ -1350,24 +1564,21 @@
             updateJsonBinData(newConfig); // Async update to JSONBin
         }
         
-        // Helper function to clean item data before saving
+        // Helper function to clean item data before saving (IMPROVED)
         function cleanItemData(item) {
             const cleaned = {};
-            for (const key in item) {
-                if (item[key] === null || item[key] === undefined || item[key] === '') {
-                    // Skip empty fields, except for boolean flags like 'pinned'
-                    if (key === 'pinned') {
-                        cleaned[key] = false;
-                    } else if (key === 'file' || key === 'due_date' || key === 'description' || key === 'file_display_name') {
-                        cleaned[key] = '';
-                    }
-                } else {
-                    cleaned[key] = item[key];
-                }
-            }
-            // Ensure essential non-empty fields exist
-            cleaned.title = cleaned.title || 'متطلب بدون عنوان';
-            cleaned.type = cleaned.type || 'note';
+            // Ensure essential fields are not null/undefined
+            cleaned.title = item.title ? item.title.trim() : 'متطلب بدون عنوان';
+            cleaned.description = item.description ? item.description.trim() : '';
+            cleaned.due_date = item.due_date || '';
+            cleaned.type = item.type || 'note';
+            cleaned.id = item.id;
+            cleaned.pinned = !!item.pinned; // Convert to strict boolean
+
+            // File/Link fields
+            cleaned.file = item.file || '';
+            cleaned.file_display_name = item.file_display_name ? item.file_display_name.trim() : '';
+
             // Ensure display name is set if file exists but display name is empty
             if (cleaned.file && !cleaned.file_display_name) {
                  cleaned.file_display_name = getFileDisplayInfo(cleaned.file).displayName || 'ملف مرفق';
@@ -1398,6 +1609,13 @@
             const fileInfo = getFileDisplayInfo(item.file);
             const currentFileName = item.file ? `${fileInfo.icon} ${fileInfo.displayName} (${item.file.startsWith('blob:') ? 'محلي' : 'خارجي'})` : '';
 
+            // NEW: Clear file button
+            const clearFileButton = item.file ? `
+                 <button type="button" onclick="clearFileSelection()" class="mt-2 text-xs text-red-500 hover:text-red-400 font-medium flex items-center">
+                    <i class="ph ph-x-circle ml-1"></i> مسح الملف/الرابط الحالي
+                 </button>
+            ` : '';
+
 
             document.getElementById('modal-content').innerHTML = `
                 <h2 class="text-xl font-bold mb-4 text-center">${item.isNew ? 'إضافة متطلب جديد' : 'تعديل المتطلب'}</h2>
@@ -1423,8 +1641,9 @@
                         </div>
                     </div>
                     
-                    ${item.file ? `<p class="text-xs text-gray-500 mt-3 flex items-center">الملف الحالي: <span class="mr-1 ${item.file.startsWith('blob:') ? 'text-yellow-500' : 'text-green-500'}">${currentFileName}</span></p>` : ''}
-                    
+                    ${item.file ? `<p id="current-file-display" class="text-xs text-gray-500 mt-3 flex items-center">الملف الحالي: <span class="mr-1 ${item.file.startsWith('blob:') ? 'text-yellow-500' : 'text-green-500'}">${currentFileName}</span></p>` : ''}
+                    ${clearFileButton}
+
                     <!-- NEW FIELD: File Display Name -->
                     <label for="modal-file-display-name" class="block text-sm font-medium mb-1 mt-3">اسم الملف المعروض (مثال: صورة الكويكب)</label>
                     <input type="text" id="modal-file-display-name" name="file_display_name" value="${item.file_display_name || ''}" placeholder="اسم الرابط الذي سيظهر للطالب" class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);" />
@@ -1452,6 +1671,18 @@
                 </form>
             `;
             showModal();
+        }
+        
+        // NEW: Function to clear file/link input
+        window.clearFileSelection = function() {
+            // Clear file input
+            document.getElementById('modal-file').value = '';
+            // Clear link input
+            document.getElementById('modal-link').value = '';
+            // Update UI feedback (hide current file display)
+            const currentFileDisplay = document.getElementById('current-file-display');
+            if(currentFileDisplay) currentFileDisplay.remove();
+            showNotification('تم مسح الملف/الرابط الحالي مؤقتاً. اضغط حفظ لتأكيد التغيير.', 'info', 3000);
         }
 
 
@@ -1488,8 +1719,8 @@
                         // External Link takes priority over old file or new local upload
                         if (value) {
                              newFileUrl = value;
-                        } else if (!oldFileUrl.startsWith('blob:')) {
-                             // User cleared the external link and the old file wasn't a blob, clear it
+                        } else if (!file && !document.getElementById('modal-link').value) {
+                             // User cleared the external link AND didn't upload a new file, clear it
                              newFileUrl = '';
                         }
                     } else {
@@ -1506,7 +1737,13 @@
                     URL.revokeObjectURL(oldFileUrl);
                 }
                 newFileUrl = await handleLocalFileUpload(file);
-            } 
+            } else if (!document.getElementById('modal-link').value) {
+                // If no new file and no external link, ensure old local blob is revoked/cleared
+                if (oldFileUrl.startsWith('blob:')) {
+                    URL.revokeObjectURL(oldFileUrl);
+                }
+                newFileUrl = '';
+            }
             
             newItem.file = newFileUrl; // Assign the final file URL
             newItem.file_display_name = formData.get('file_display_name') || ''; // NEW: Capture custom display name
@@ -1528,9 +1765,11 @@
             } else {
                 // EDIT (Logic for moving or updating item)
                 let itemFound = false;
+                let oldSubjectName = null;
                 for (const subj of SUBJECTS) {
                     const index = updatedSubjects[subj].findIndex(item => item.id === finalItemId);
                     if (index !== -1) {
+                        oldSubjectName = subj;
                         if (subj === currentSubjectName) {
                             updatedSubjects[subj][index] = newItem;
                             showNotification(`تم تحديث المتطلب: ${newItem.title}.`, 'success');
@@ -1548,9 +1787,19 @@
                     showNotification(`تمت إضافة المتطلب: ${newItem.title}.`, 'success');
                 }
             }
-
+            
+            const subjectId = currentSubjectName.replace(/\s/g, '-');
+            
             updateData(updatedSubjects); // Uses the new JSONBin update logic
             closeModal(); 
+            
+            // NEW: Scroll to and highlight the updated/added section
+            setTimeout(() => {
+                const targetElement = document.getElementById(`subject-${subjectId}`);
+                if (targetElement) {
+                    targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }, 350); 
         };
 
         // --- FIX START: Deletion logic refactor ---
