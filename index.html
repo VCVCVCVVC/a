@@ -3,1977 +3,307 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title> فصل المتميزين</title>
-    <!-- Load Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Load Poppins font -->
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <!-- Load Phosphor Icons for a modern look -->
-    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
-    <!-- Load qrcode.js for QR code generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <title>قريباً... انطلاقة جديدة!</title>
+    <!-- تحميل Tailwind CSS CDN --><script src="https://cdn.tailwindcss.com"></script>
+    
     <style>
-        /* Custom CSS for Dark Mode with NEW Green/Gold Theme */
-        :root {
-            --color-green: #00A693; /* Accent Green/Teal */
-            --color-gold: #FFDAB9; /* Light Gold/Peach Accent */
-            --color-gradient: linear-gradient(135deg, var(--color-green) 0%, var(--color-gold) 100%);
-        }
-        [data-theme="light"] {
-            --bg-color: #f7f9fc;
-            --text-color: #0D0D0D;
-            --card-bg: #ffffff;
-            --card-border: #e0e6f0;
-            --header-bg: linear-gradient(135deg, #004D40 0%, #00897B 100%);
-            --notify-success: #10B981;
-            --notify-error: #EF4444;
-            --notify-info: #3B82F6;
-        }
-        [data-theme="dark"] {
-            --bg-color: #1a1a1a; /* Dark background */
-            --text-color: #F0F0F0;
-            --card-bg: #282828; /* Slightly lighter card */
-            --card-border: #444444;
-            --header-bg: linear-gradient(135deg, #101010 0%, #003328 100%); /* Dark to Deep Green/Black */
-            --notify-success: #34D399;
-            --notify-error: #F87171;
-            --notify-info: #60A5FA;
-        }
-        body {
-            font-family: 'Poppins', sans-serif;
-            transition: background-color 0.3s, color 0.3s;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-        }
-        .bg-gradient-primary {
-            background: var(--header-bg);
-        }
-        .text-gradient {
-            /* Use the new green/gold gradient for text */
-            background: linear-gradient(90deg, var(--color-green), var(--color-gold));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        /* Style for the Anti-Inspect block */
-        #anti-inspect-overlay {
-            position: fixed;
-            top: 0;
-            right: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(18, 18, 18, 0.95);
-            color: var(--text-color);
-            z-index: 10000;
-            display: none;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            font-size: 1.5rem;
-            padding: 2rem;
-            line-height: 1.5;
-        }
-        .requirement-card {
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
-            border: 1px solid var(--card-border);
-        }
-        .requirement-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
-            border-color: var(--color-green); /* Hover accent */
-        }
-
-        /* Custom scrollbar for better aesthetics */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: var(--bg-color);
-        }
-        ::-webkit-scrollbar-thumb {
-            background: var(--color-green); /* Scrollbar accent */
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: var(--color-gold);
-        }
-
-        /* Tailwind Animation Classes */
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: .5; }
-        }
-        .animate-pulse {
-            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        /* Style for the QR code display */
-        #qrcode img {
-            margin: 0 auto;
-        }
-
-        /* Wave SVG Styling */
-        .wave-bottom {
-            position: absolute;
-            bottom: 0;
-            right: 0;
-            width: 100%;
-            height: auto;
-            color: var(--bg-color); /* Matches body background */
-            z-index: 10;
-        }
-        .wave-top {
-             position: absolute;
-            top: 0;
-            right: 0;
-            width: 100%;
-            height: auto;
-            color: var(--bg-color); /* Matches body background */
-            transform: rotate(180deg);
-            z-index: 10;
-        }
-        .text-accent-green { color: var(--color-green); }
-        .text-accent-gold { color: var(--color-gold); }
-
-        /* Style for file upload progress */
-        #upload-progress-bar {
-            height: 8px;
-            background-color: var(--card-border);
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 10px;
-        }
-        #upload-progress {
-            width: 0;
-            height: 100%;
-            background-color: var(--color-green);
-            transition: width 0.3s;
-        }
-        
-        /* New Notification Container Styles */
-        #notification-container {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 1000;
-            display: flex;
-            flex-direction: column-reverse; /* Newest on bottom */
-            gap: 10px;
-        }
-        .toast {
-            min-width: 250px;
-            max-width: 90vw;
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            padding: 1rem;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            transform: translateX(100%);
-            opacity: 0;
-            transition: transform 0.4s ease-out, opacity 0.4s ease-out;
-        }
-        .toast.show {
-            transform: translateX(0);
-            opacity: 1;
-        }
-        .toast.success { border-right: 4px solid var(--notify-success); }
-        .toast.error { border-right: 4px solid var(--notify-error); }
-        .toast.info { border-right: 4px solid var(--notify-info); }
-
-        /* Custom style for the File Preview Modal - IMPROVEMENTS */
-        #file-preview-content {
-            max-height: 80vh;
-            overflow-y: auto;
-            background-color: var(--card-bg); /* Use card background for consistency */
-            padding: 1rem;
-            border-radius: 8px;
-            display: flex; /* For centering content */
-            justify-content: center;
-            align-items: center;
-            flex-direction: column; /* Allow content to stack */
-            min-height: 100px; /* Minimum space for preview */
-        }
-        #file-preview-content img {
-            max-width: 100%;
-            max-height: 70vh; /* Limit height for better fit */
-            width: auto;
-            height: auto;
-            border-radius: 8px;
-            object-fit: contain;
-        }
-        /* New Progress Bar Styling */
-        #progress-bar-container {
-            height: 12px;
-            border-radius: 6px;
-            background-color: rgba(255, 255, 255, 0.2);
-            overflow: hidden;
-            width: 100%;
-        }
-        #progress-bar {
-            height: 100%;
-            background: linear-gradient(90deg, #00A693, #34D399); /* Bright Green Gradient */
-            transition: width 0.5s ease-in-out;
-            box-shadow: 0 0 5px rgba(0, 166, 147, 0.5);
-        }
-        
-    </style>
-</head>
-<body data-theme="dark" class="dark">
-    <!-- Anti-Inspect/DevTools Lock Overlay -->
-    <div id="anti-inspect-overlay">
-        <p class="mb-4">
-            <i class="ph ph-lock-key text-5xl text-red-400"></i>
-        </p>
-        <h2 class="text-3xl font-bold mb-3">تم تفعيل قفل ميزة المسؤول</h2>
-        <p class="text-lg">تحظر طبقة ادارة الموقع في هذا التطبيق أدوات الفحص لمنع العبث أو فحص البيانات. يرجى إغلاق أدوات المطور للمتابعة.</p>
-    </div>
-
-    <div id="app" class="min-h-screen flex flex-col">
-
-        <!-- Header with Wave SVG -->
-        <header id="header" class="relative pb-16 pt-10 sm:pt-16 bg-gradient-primary text-white overflow-hidden">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-20">
-                <div class="flex justify-between items-start">
-                    <div>
-                        <h1 class="text-4xl sm:text-5xl font-extrabold tracking-tight">
-                             فصل المتميزين
-                        </h1>
-                        <p class="mt-2 text-lg sm:text-xl font-light opacity-90">
-                            مركز واحد لجميع تحديثات الصف — بسيط، آمن، ومنظم بجمالية.
-                        </p>
-                    </div>
-                    <div class="flex flex-col items-start space-y-3">
-                        <!-- QR Code Button -->
-                        <button id="qr-toggle" class="p-3 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30 transition-all focus:outline-none" onclick="showQrModal()">
-                            <i class="ph ph-qr-code text-2xl"></i>
-                        </button>
-                        <!-- Dark Mode Toggle -->
-                        <button id="mode-toggle" class="p-3 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30 transition-all focus:outline-none" onclick="toggleDarkMode()">
-                            <i id="mode-icon" class="ph ph-sun text-2xl"></i>
-                        </button>
-                        <!-- Admin Button -->
-                        <button id="admin-toggle" class="px-4 py-2 rounded-full bg-white text-gray-800 font-semibold hover:bg-gray-200 transition-colors focus:outline-none text-sm shadow-lg" onclick="showAdminLoginModal()">
-                            المسؤول
-                        </button>
-                    </div>
-                </div>
-                <!-- Completion Tracker Summary -->
-                <div id="completion-summary" class="mt-8 p-4 rounded-xl bg-black bg-opacity-50 border border-green-800 border-opacity-50 flex flex-col sm:flex-row items-center justify-between text-sm sm:text-lg font-semibold shadow-inner">
-                    <div class="flex flex-col w-full sm:w-auto mb-2 sm:mb-0">
-                        <div class="flex items-center w-full mb-2">
-                             <p class="flex items-center">
-                                <i class="ph ph-chart-line-up text-green-400 text-2xl ml-3"></i>
-                                <span>إجمالي المهام المتبقية: <span id="remaining-count">0</span></span>
-                            </p>
-                            <p class="text-accent-gold flex items-center mr-6">
-                                <i class="ph ph-check-circle text-2xl ml-3"></i>
-                                <span>تم الإنجاز: <span id="completed-count">0</span> (<span id="completed-percent">0%</span>)</span>
-                            </p>
-                        </div>
-                        <!-- NEW: Progress Bar -->
-                        <div id="progress-bar-container">
-                            <div id="progress-bar" style="width: 0%;"></div>
-                        </div>
-                    </div>
-                    
-                    <!-- Global Archive Toggle and Motivational Message -->
-                    <div class="flex items-center justify-between w-full sm:w-auto mt-4 sm:mt-0 sm:mr-4">
-                        <p id="motivational-message" class="text-xs sm:text-sm font-medium italic"></p>
-                        <button id="global-archive-toggle" onclick="toggleGlobalArchive()" class="px-3 py-1 rounded-full text-xs font-semibold bg-white bg-opacity-20 hover:bg-opacity-30 transition-colors ml-4 whitespace-nowrap">
-                            إخفاء الأرشيفات
-                        </button>
-                         <!-- NEW: Add Subject Button (visible only in Admin mode - handled by JS/renderApp) -->
-                        <button id="add-subject-button" onclick="showAddSubjectModal()" class="px-3 py-1 rounded-full text-xs font-semibold bg-green-500 hover:bg-green-600 transition-colors ml-2 whitespace-nowrap hidden">
-                            <i class="ph ph-plus-circle ml-1"></i> إضافة مادة
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <!-- Wave SVG -->
-            <svg class="wave-bottom" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 320" aria-hidden="true">
-                <path fill="currentColor" fill-opacity="1" d="M0,192L48,197.3C96,203,192,213,288,208C384,203,480,181,576,170.7C672,160,768,160,864,176C960,192,1056,224,1152,213.3C1248,203,1344,149,1392,122.7L1440,96L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"></path>
-            </svg>
-        </header>
-
-        <!-- Main Content Area with Global Search -->
-        <main id="main-content" class="flex-grow max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-10">
-             <input type="text" id="global-search-input" oninput="handleSearchInput()" placeholder="ابحث في جميع المتطلبات بالعنوان أو الوصف..." class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500 mb-8" style="background-color: var(--card-bg);" />
-        </main>
-
-        <!-- Footer -->
-        <footer class="relative pt-16 mt-10 bg-gradient-primary text-white overflow-hidden">
-            <!-- Wave SVG (Inverted for footer) -->
-            <svg class="wave-top" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 320" aria-hidden="true">
-                <path fill="currentColor" fill-opacity="1" d="M0,192L48,197.3C96,203,192,213,288,208C384,203,480,181,576,170.7C672,160,768,160,864,176C960,192,1056,224,1152,213.3C1248,203,1344,149,1392,122.7L1440,96L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"></path>
-            </svg>
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 relative z-20 text-center">
-                <p class="text-sm opacity-80">
-                    <span class="mr-4">CS v1.0</span>
-                    <span id="last-updated-display" class="mr-4"></span>
-                </p>
-                <p class="text-xs opacity-70 mt-1">
-                    تم تطويره من قبل زياد | حالة الإنجاز النهائي: <span id="footer-completion-status">0%</span>
-                </p>
-            </div>
-        </footer>
-
-        <!-- Generic Modal Structure (for Admin Login, Add/Edit, QR Code, Confirmation) -->
-        <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm hidden items-center justify-center z-50">
-            <div id="modal-content" class="p-6 rounded-xl shadow-2xl w-full max-w-md mx-4 transition-all scale-95 opacity-0 duration-300" style="background-color: var(--card-bg);">
-                <!-- Modal content will be injected here -->
-            </div>
-        </div>
-        
-        <!-- Loading Modal for JSONBin Fetch -->
-        <div id="loading-modal-backdrop" class="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-sm hidden items-center justify-center z-[60]">
-            <div class="p-8 rounded-xl shadow-2xl bg-gray-800 text-white flex flex-col items-center">
-                <!-- NEW: Simple Pulsing Loader for Data Fetch -->
-                <div class="w-6 h-6 rounded-full bg-green-500 animate-pulse"></div>
-                <p id="loading-message" class="mt-4 text-lg">جارٍ جلب البيانات من الخادم...</p>
-            </div>
-        </div>
-
-        <!-- NEW: Notification Container -->
-        <div id="notification-container"></div>
-
-    </div>
-
-    <script>
-        // --- GLOBAL CONFIG & INITIALIZATION ---
-        const ADMIN_PASS = "High-school$admin";
-        
-        // --- JSONBIN.IO CONFIGURATION (User provided data) ---
-        const JSONBIN_ID = "68fa19f543b1c97be97a746a"; // <--- ADDED!
-        const JSONBIN_SECRET_KEY = "$2a$10$OgesEl/ryBSJSZP6gf4Z3ecX20iq2yJoA6tEraNsO/UvPGhG1.29S"; // <--- ADDED!
-        const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
-
-        const POLLING_INTERVAL = 5000; // Check for updates every 5 seconds (to simulate real-time)
-
-        // IMPORTANT: This list must be synchronized with the data structure in JSONBin
-        let SUBJECTS = [
-            "الرياضيات", "الفيزياء", "الكيمياء", "علوم الأرض",
-            "مصادر البحث والمعلومات", "التنمية المستدامة"
-        ];
-        // Local Storage Keys
-        const NEW_TAG_KEY = "crp_seen_items";
-        const COMPLETED_ITEMS_KEY = "crp_completed_items";
-        const THEME_KEY = "crp_theme";
-        const FILTER_KEY_PREFIX = "crp_filter_";
-        const ARCHIVE_KEY_PREFIX = "crp_archive_visible_";
-        // New: Global Archive Toggle Key
-        const GLOBAL_ARCHIVE_KEY = "crp_global_archive_hidden"; 
-        // New: DevTools Lock Toggle Key
-        const DEV_LOCK_KEY = "crp_devtools_lock_enabled";
-
-
-        // UPDATED: Final requirement types based on user requests
-        const TYPE_MAP = {
-            'homework': 'واجب منزلي',
-            'exam': 'اختبار', 
-            'research': 'بحث', 
-            'brochure': 'مطوية', 
-            'link': 'رابط خارجي', // Renamed for clarity
-            'file': 'ملف / صورة', // Renamed for clarity
-            'note': 'ملاحظة'
-        };
-
-        let currentData = null;
-        let isDarkMode = true;
-        let isAdmin = false;
-        let currentFilters = {}; // { subjectName: 'filterType' }
-        
-        // Map to store temporary Blob URLs for the current session (to be reused upon re-rendering)
-        let localFileUrls = new Map(); 
-        
-        // NEW: Cache/Polling variables
-        let lastKnownDataHash = null;
-        let isInitialLoad = true;
-        let lastUpdateTime = null;
-        let searchTimeout = null;
-        const DEBOUNCE_DELAY = 300; // Delay for search input
-
-        // Initial MVP Data Structure (Matching the selected canvas data for fallback) - UPDATED PLACEHOLDERS
-        const MVP_DATA = {
-            "subjects": {
-                "الرياضيات": [
-                  {
-                    "title": "واجب منزلي: ورقة عمل الجبر",
-                    "description": "حل جميع التمارين في الصفحات 32–35.",
-                    "due_date": "2025-10-30",
-                    "type": "homework",
-                    // UPDATED: Larger, clearer placeholder
-                    "file": "https://placehold.co/600x400/00A693/FFFFFF?text=Homework+Sheet", 
-                    "pinned": true,
-                    "id": "math-1",
-                    "file_display_name": "ورقة عمل الجبر (رابط)" // NEW FIELD added for consistency
-                  },
-                  {
-                    "title": "اختبار قصير: الدوال المثلثية",
-                    "description": "الاستعداد للاختبار القصير في نهاية الأسبوع.",
-                    "due_date": "2025-10-25",
-                    "type": "exam",
-                    "file": "",
-                    "pinned": false,
-                    "id": "math-2",
-                    "file_display_name": "" // NEW FIELD added for consistency
-                  },
-                  {
-                    "title": "تقرير: نظرية الأوتار",
-                    "description": "ملخص عن أهمية نظرية الأوتار في الفيزياء الحديثة.",
-                    "due_date": "2024-10-15",
-                    "type": "research",
-                    "file": "",
-                    "pinned": false,
-                    "id": "math-3-old",
-                    "file_display_name": "" // NEW FIELD added for consistency
-                  }
-                ],
-                "الفيزياء": [
-                  {
-                    "title": "تسليم البحث: الطاقة النووية",
-                    "description": "تحميل البحث كمستند PDF قبل الموعد النهائي.",
-                    "due_date": "2025-11-02",
-                    "type": "research",
-                    "file": "https://placehold.co/100x40/00A693/FFFFFF?text=PDF_Doc",
-                    "pinned": false,
-                    "id": "physics-1",
-                    "file_display_name": "رابط مستند PDF" // NEW FIELD added for consistency
-                  },
-                  {
-                    "title": "صورة مرجعية: طاقة الكويكبات",
-                    "description": "صورة تم نشرها بواسطة ناسا كمصدر للمطوية.",
-                    "due_date": "2025-11-15",
-                    "type": "file",
-                    // UPDATED: Larger, clearer placeholder
-                    "file": "https://placehold.co/800x400/FFDAB9/0D0D0D?text=Space+Reference+Image", 
-                    "pinned": false,
-                    "id": "physics-2",
-                    "file_display_name": "صورة الكويكب (مرجع)" // NEW FIELD added for consistency
-                  }
-                ],
-                "الكيمياء": [],
-                "علوم الأرض": [],
-                "مصادر البحث والمعلومات": [],
-                "التنمية المستدامة": []
-            },
-            "meta": {
-                "version": "1.0",
-                "admin_pass": ADMIN_PASS
-            }
-        };
-
-        // --- JSONBIN UTILITIES ---
-        
-        // Simple hash function for quick data comparison (NEW: Cache)
-        function hashData(data) {
-             return JSON.stringify(data).length; // Simple length check as a quick hash
-        }
-
-        async function fetchJsonBinData() {
-            if (JSONBIN_ID === "YOUR_JSONBIN_ID" || JSONBIN_SECRET_KEY === "") {
-                console.error("JSONBIN_ID or Secret Key is not set. Using MVP data.");
-                if (isInitialLoad) {
-                    currentData = MVP_DATA;
-                    SUBJECTS = Object.keys(MVP_DATA.subjects);
-                    renderApp(); 
-                    isInitialLoad = false;
-                }
-                return;
-            }
-            
-            if (isInitialLoad) {
-                showLoadingModal('جارٍ جلب البيانات من الخادم...');
-            }
-
-            try {
-                const response = await fetch(JSONBIN_URL + '/latest', {
-                    headers: {
-                        'X-Master-Key': JSONBIN_SECRET_KEY,
-                        'X-Bin-Meta': 'false', // Get raw data, not metadata
-                        // NEW: Conditional header to reduce load if data hasn't changed (optional for JSONBin)
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                const dataHash = hashData(data);
-                
-                // NEW: Check cache status
-                if (dataHash === lastKnownDataHash && !isInitialLoad) {
-                    // Data hasn't changed, skip rendering
-                    return;
-                }
-                
-                lastKnownDataHash = dataHash;
-                lastUpdateTime = new Date().toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' });
-
-                currentData = data;
-                SUBJECTS = Object.keys(currentData.subjects);
-                
-                // Ensure every item has a file_display_name (fallback/migration)
-                for (const subject in currentData.subjects) {
-                    currentData.subjects[subject] = currentData.subjects[subject].map(item => {
-                        if (item.file && !item.file_display_name) {
-                            const info = getFileDisplayInfo(item.file);
-                            item.file_display_name = info.displayName || 'ملف مرفق';
-                        }
-                        return item;
-                    });
-                }
-                
-            } catch (error) {
-                console.error("JSONBin Fetch Error (using previous/MVP data as fallback):", error);
-                if (!currentData) { 
-                    currentData = MVP_DATA;
-                    SUBJECTS = Object.keys(MVP_DATA.subjects);
-                }
-            } finally {
-                if (isInitialLoad) {
-                    hideLoadingModal();
-                    isInitialLoad = false;
-                }
-                renderApp();
-            }
-        }
-
-        async function updateJsonBinData(data) {
-            if (JSONBIN_ID === "YOUR_JSONBIN_ID" || JSONBIN_SECRET_KEY === "") {
-                 console.error("JSONBIN_ID or Secret Key is not set. Data not saved.");
-                 showNotification("فشل حفظ البيانات. يرجى التحقق من مفتاح JSONBin.", "error");
-                 return;
-            }
-            
-            try {
-                const response = await fetch(JSONBIN_URL, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Master-Key': JSONBIN_SECRET_KEY,
-                    },
-                    body: JSON.stringify(data)
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                // Update hash and time locally immediately after successful push (NEW: Cache)
-                lastKnownDataHash = hashData(data);
-                lastUpdateTime = new Date().toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' });
-                
-                showNotification("تم حفظ البيانات بنجاح.", "success");
-                renderApp(); // Force re-render after successful push
-            } catch (error) {
-                console.error("JSONBin Update Error:", error);
-                showNotification("فشل حفظ البيانات. يرجى التحقق من المفتاح السري ومعرف البين.", "error");
-            }
-        }
-
-        // --- APP INITIALIZATION ---
-
-        function startPolling() {
-            // First fetch is immediate, then poll every POLLING_INTERVAL
-            fetchJsonBinData(); 
-            setInterval(fetchJsonBinData, POLLING_INTERVAL);
-        }
-
-        function initApp() {
-            // Load theme preference
-            const savedTheme = localStorage.getItem(THEME_KEY);
-            isDarkMode = savedTheme === 'dark';
-            document.body.setAttribute('data-theme', savedTheme || 'dark');
-            document.body.classList.toggle('dark', isDarkMode);
-
-            const modeIcon = document.getElementById('mode-icon');
-            // Ensure correct icon is set initially based on isDarkMode state
-            modeIcon.classList.remove('ph-sun', 'ph-moon');
-            modeIcon.classList.add(isDarkMode ? 'ph-sun' : 'ph-moon');
-
-
-            // Load saved filters
-            SUBJECTS.forEach(subjectName => {
-                const savedFilter = localStorage.getItem(FILTER_KEY_PREFIX + subjectName);
-                if (savedFilter) {
-                    currentFilters[subjectName] = savedFilter;
-                }
-            });
-            
-            // Set initial global archive state
-            updateGlobalArchiveToggleUI();
-
-            startPolling();
-        }
-
-        // --- LOCAL STORAGE UTILITIES ---
-
-        function getSeenItems() {
-            try {
-                const stored = localStorage.getItem(NEW_TAG_KEY);
-                return stored ? new Set(JSON.parse(stored)) : new Set();
-            } catch (e) {
-                console.error("Error reading from localStorage (Seen):", e);
-                return new Set();
-            }
-        }
-
-        function markAllAsSeen(allRequirements) {
-            const seenItems = getSeenItems();
-            let changed = false;
-            allRequirements.forEach(item => {
-                if (!seenItems.has(item.id)) {
-                    seenItems.add(item.id);
-                    changed = true;
-                }
-            });
-            if (changed) {
-                try {
-                    localStorage.setItem(NEW_TAG_KEY, JSON.stringify(Array.from(seenItems)));
-                } catch (e) {
-                    console.error("Error writing to localStorage (Seen):", e);
-                }
-            }
-        }
-
-        function getCompletedItems() {
-            try {
-                const stored = localStorage.getItem(COMPLETED_ITEMS_KEY);
-                return stored ? new Set(JSON.parse(stored)) : new Set();
-            } catch (e) {
-                console.error("Error reading from localStorage (Completed):", e);
-                return new Set();
-            }
-        }
-
-        function toggleCompleted(itemId) {
-            const completedItems = getCompletedItems();
-            if (completedItems.has(itemId)) {
-                completedItems.delete(itemId);
-            } else {
-                completedItems.add(itemId);
-            }
-            try {
-                localStorage.setItem(COMPLETED_ITEMS_KEY, JSON.stringify(Array.from(completedItems)));
-                showNotification(completedItems.has(itemId) ? "تم وضع المتطلب كمنجز." : "تم إلغاء إنجاز المتطلب.", "info", 2000);
-            } catch (e) {
-                console.error("Error writing to localStorage (Completed):", e);
-                showNotification("فشل في تحديث حالة الإنجاز.", "error", 2000);
-            }
-            renderApp(); // Rerender to update counter and checkbox state
-        }
-
-        function isArchiveVisible(subjectName) {
-            // Check global state first
-            if (localStorage.getItem(GLOBAL_ARCHIVE_KEY) === 'true') {
-                 return false; // Global hide overrides local show
-            }
-            // Fallback to local state if global is not set to hide
-            return localStorage.getItem(ARCHIVE_KEY_PREFIX + subjectName) !== 'false';
-        }
-        
-        // New: Update UI for global archive toggle
-        function updateGlobalArchiveToggleUI() {
-            const isHidden = localStorage.getItem(GLOBAL_ARCHIVE_KEY) === 'true';
-            const button = document.getElementById('global-archive-toggle');
-            if (button) {
-                if (isHidden) {
-                    button.textContent = 'عرض الأرشيفات';
-                    button.classList.replace('bg-opacity-20', 'bg-opacity-40');
-                } else {
-                    button.textContent = 'إخفاء الأرشيفات';
-                    button.classList.replace('bg-opacity-40', 'bg-opacity-20');
-                }
-            }
-        }
-        
-        // New: Toggle all archives globally
-        window.toggleGlobalArchive = function() {
-            const isHidden = localStorage.getItem(GLOBAL_ARCHIVE_KEY) === 'true';
-            localStorage.setItem(GLOBAL_ARCHIVE_KEY, isHidden ? 'false' : 'true');
-            updateGlobalArchiveToggleUI();
-            renderApp();
-        }
-
-        window.toggleArchiveVisibility = function(subjectName) {
-            const isVisible = isArchiveVisible(subjectName);
-            // This is now only a local override toggle if the global one is 'false' (visible)
-            localStorage.setItem(ARCHIVE_KEY_PREFIX + subjectName, isVisible ? 'false' : 'true');
-            renderApp();
-        }
-
-        // --- FILTERING LOGIC ---
-
-        window.setFilter = function(subjectName, filterType) {
-            if (currentFilters[subjectName] === filterType) {
-                delete currentFilters[subjectName]; // Toggle off
-                localStorage.removeItem(FILTER_KEY_PREFIX + subjectName);
-            } else {
-                currentFilters[subjectName] = filterType; // Set new filter
-                localStorage.setItem(FILTER_KEY_PREFIX + subjectName, filterType);
-            }
-            renderApp();
-        }
-
-        window.toggleCompleted = toggleCompleted;
-        window.performConfirmedDeletion = performConfirmedDeletion; // Make global for string execution
-        
-        // NEW: Debounced search handler
-        window.handleSearchInput = function() {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(renderApp, DEBOUNCE_DELAY);
-        }
-
-
-        // --- UI RENDERING FUNCTIONS ---
-
-        function getIconForType(type) {
-            // Updated icons/colors for the new types (green/gold theme)
-            switch (type) {
-                case 'homework': return `<i class="ph ph-note-pencil text-xl text-yellow-400"></i>`; // الواجبات
-                case 'exam': return `<i class="ph ph-book-open-text text-xl text-red-500"></i>`; // الاختبارات (Critical/Red)
-                case 'research': return `<i class="ph ph-magnifying-glass text-xl text-cyan-400"></i>`; // البحوث
-                case 'brochure': return `<i class="ph ph-article text-xl text-pink-400"></i>`; // المطويات
-                case 'link': return `<i class="ph ph-link text-xl text-blue-400"></i>`;
-                case 'file': return `<i class="ph ph-file-arrow-down text-xl text-green-400"></i>`;
-                case 'note': return `<i class="ph ph-info text-xl text-gray-400"></i>`;
-                default: return `<i class="ph ph-info text-xl text-gray-400"></i>`;
-            }
-        }
-        
-        // New helper to determine file type for display
-        function getFileDisplayInfo(fileUrl) {
-            if (!fileUrl) return { displayName: '', icon: '' };
-
-            if (fileUrl.startsWith('blob:')) {
-                return { displayName: 'ملف محلي (صورة/مستند)', icon: '<i class="ph ph-folder-open text-xs ml-1"></i>' };
-            }
-            
-            const lowerUrl = fileUrl.toLowerCase();
-            if (lowerUrl.includes('.pdf')) return { displayName: 'مستند PDF', icon: '<i class="ph ph-file-pdf text-xs ml-1"></i>' };
-            if (lowerUrl.includes('.zip') || lowerUrl.includes('.rar')) return { displayName: 'أرشيف مضغوط', icon: '<i class="ph ph-archive-box text-xs ml-1"></i>' };
-            if (lowerUrl.includes('.png') || lowerUrl.includes('.jpg') || lowerUrl.includes('.jpeg') || lowerUrl.includes('.gif')) return { displayName: 'صورة (JPG/PNG)', icon: '<i class="ph ph-image text-xs ml-1"></i>' };
-            if (lowerUrl.includes('.doc') || lowerUrl.includes('.docx')) return { displayName: 'مستند Word', icon: '<i class="ph ph-file-doc text-xs ml-1"></i>' };
-            if (lowerUrl.startsWith('http')) return { displayName: 'رابط خارجي', icon: '<i class="ph ph-globe-simple text-xs ml-1"></i>' };
-            
-            return { displayName: 'رابط/ملف غير محدد', icon: '<i class="ph ph-file text-xs ml-1"></i>' };
-        }
-
-        function isDuePast(dateString) {
-            if (!dateString) return false;
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const dueDate = new Date(dateString);
-            dueDate.setHours(0, 0, 0, 0);
-            return dueDate < today;
-        }
-        
-        // NEW: Function to check if due date is imminent (within 48 hours)
-        function isDueUrgent(dateString) {
-            if (!dateString) return false;
-            const today = new Date();
-            const dueDate = new Date(dateString);
-            const diffTime = dueDate.getTime() - today.getTime();
-            // Check if due date is future and within 48 hours (2 days * 24h * 60m * 60s * 1000ms)
-            return diffTime > 0 && diffTime < (2 * 24 * 60 * 60 * 1000);
-        }
-
-
-        function renderRequirementCard(subjectName, item, isArchived = false) {
-            const dueDate = item.due_date ? `يستحق: ${item.due_date}` : '';
-            
-            // NEW: Use file_display_name if available, otherwise fallback to auto-detected type
-            const fileDisplayName = item.file_display_name || getFileDisplayInfo(item.file).displayName || 'ملف مرفق';
-            const fileInfo = getFileDisplayInfo(item.file);
-            
-            let fileElement = '';
-            if (item.file) {
-                 // NEW: This button opens the preview modal
-                 fileElement = `
-                    <button onclick="showFilePreviewModal('${subjectName}', '${item.id}')" 
-                            class="text-xs text-green-500 hover:text-green-400 font-semibold truncate flex items-center p-1 -m-1 rounded hover:bg-gray-700 transition-colors">
-                        ${fileInfo.icon} 
-                        <span>${fileDisplayName}</span>
-                    </button>
-                `;
-            }
-
-
-            // Status Check
-            const completedItems = getCompletedItems();
-            const isCompleted = completedItems.has(item.id);
-            const cardOpacity = isCompleted && !isAdmin ? 'opacity-50' : '';
-            const isPast = isDuePast(item.due_date);
-
-            // Badges (using theme colors)
-            const seenItems = getSeenItems();
-            const isNew = !isAdmin && !isArchived && !seenItems.has(item.id);
-            // NEW: Pin badge uses stronger yellow color
-            const pinBadge = item.pinned ? '<span class="mr-2 inline-flex items-center rounded-full bg-yellow-600 px-2 py-0.5 text-xs font-medium text-white shadow-md"><i class="ph ph-push-pin-fill ml-1"></i>مثبت</span>' : '';
-            const newBadge = isNew ? '<span class="mr-2 inline-flex items-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white animate-pulse"><i class="ph ph-sparkle ml-1"></i>جديد</span>' : '';
-            const badges = `${newBadge} ${pinBadge}`;
-
-
-            let actionControls = '';
-            if (isAdmin) {
-                // Admin Controls (Edit/Delete)
-                actionControls = `
-                    <div class="mt-3 flex space-x-2 flex-row-reverse justify-end">
-                        <button onclick="showEditModal('${subjectName}', '${item.id}')" class="text-xs text-green-500 hover:text-green-400 font-medium">
-                            <i class="ph ph-pencil-simple-line ml-1"></i>تعديل
-                        </button>
-                        <button onclick="deleteRequirement('${subjectName}', '${item.id}', true)" class="text-xs text-gray-500 hover:text-gray-400 font-medium">
-                            <i class="ph ph-trash ml-1"></i>حذف
-                        </button>
-                    </div>
-                `;
-            } else {
-                // Student Controls (Completion Toggle)
-                actionControls = `
-                    <div class="mt-3 flex justify-start">
-                        <label class="flex items-center cursor-pointer text-sm font-medium text-green-400">
-                            <input type="checkbox" onchange="toggleCompleted('${item.id}')" ${isCompleted ? 'checked' : ''} class="form-checkbox h-5 w-5 text-green-500 border-gray-600 rounded focus:ring-green-500" style="margin-left: 0.5rem;">
-                            ${isCompleted ? 'تم الإنجاز' : 'وضع كمنجز'}
-                        </label>
-                    </div>
-                `;
-            }
-
-            // Highlighting based on status
-            let dueDateClass = 'text-gray-400';
-            if (isPast) {
-                 dueDateClass = 'text-red-500';
-            } else if (isDueUrgent(item.due_date) && !isArchived) { // NEW: Urgent
-                 dueDateClass = 'text-yellow-500 font-bold'; 
-            } else if (isNew && !isArchived) { 
-                 // NEW: Highlight due date in green if it's a "New" item
-                 dueDateClass = 'text-green-400 font-bold'; 
-            }
-
-            return `
-                <div class="requirement-card p-4 rounded-xl transition-all ${cardOpacity}" style="background-color: var(--card-bg);">
-                    <div class="flex items-start justify-between">
-                        <div class="flex items-start">
-                            ${getIconForType(item.type)}
-                            <h3 class="mr-3 text-lg font-semibold">${item.title}</h3>
-                        </div>
-                        <div>
-                            ${badges}
-                        </div>
-                    </div>
-                    <p class="mt-2 text-sm opacity-70">${item.description}</p>
-                    <div class="mt-3 text-xs font-mono opacity-80 flex items-center justify-between">
-                        <p class="font-medium ${dueDateClass}">
-                            ${dueDate}
-                        </p>
-                        ${fileElement}
-                    </div>
-                    ${actionControls}
-                </div>
-            `;
-        }
-        
-        // NEW: File Preview Modal Function - IMPROVED
-        window.showFilePreviewModal = function(subjectName, itemId) {
-             const subjectItems = currentData.subjects[subjectName];
-             const item = subjectItems ? subjectItems.find(i => i.id === itemId) : null;
-             
-             if (!item || !item.file) {
-                 showNotification("لا يوجد ملف مرفق لعرضه.", 'error');
-                 return;
-             }
-             
-             const fileUrl = item.file;
-             const fileDisplayName = item.file_display_name || 'ملف مرفق';
-             const isImage = fileUrl.toLowerCase().match(/\.(jpeg|jpg|png|gif|webp)$/);
-             const isLocal = fileUrl.startsWith('blob:');
-             
-             let previewContent = '';
-             let buttonText = 'فتح الرابط الخارجي';
-             
-             if (isImage) {
-                 // Image preview (IMPROVED: uses the updated CSS for centering and resizing)
-                 previewContent = `<img src="${fileUrl}" alt="${fileDisplayName}" onerror="this.onerror=null;this.src='https://placehold.co/400x200/FF0000/FFFFFF?text=تعذر عرض الصورة'">`;
-                 buttonText = 'عرض الصورة في نافذة جديدة';
-             } else if (isLocal) {
-                  // Cannot preview local blobs that aren't images well, fallback to warning
-                  previewContent = `<p class="text-yellow-500 text-center py-4"><b>تنبيه:</b> هذا ملف محلي لا يمكن عرضه مباشرة في هذه النافذة. يجب تحميله أولاً.</p>`;
-                  buttonText = 'تحميل الملف المحلي';
-             } else {
-                 // Link or Document (PDF, Word, etc.)
-                 previewContent = `<p class="text-center py-4 opacity-80">الملف عبارة عن مستند (${getFileDisplayInfo(fileUrl).displayName}) أو رابط خارجي. سيتم فتحه في نافذة جديدة.</p>`;
-                 buttonText = 'فتح الملف/المستند';
-             }
-
-             document.getElementById('modal-content').innerHTML = `
-                 <h2 class="text-xl font-bold mb-4 text-center">${fileDisplayName}</h2>
-                 
-                 <div id="file-preview-content" class="mb-4">
-                    ${previewContent}
-                 </div>
-
-                 <div class="mt-6 flex flex-col space-y-3">
-                     <a href="${fileUrl}" target="_blank" class="w-full text-center py-3 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors">
-                         <i class="ph ph-arrow-square-out ml-2"></i> ${buttonText}
-                     </a>
-                     <button onclick="closeModal()" class="w-full py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إغلاق</button>
-                 </div>
-             `;
-             // Adjust modal width for image/file preview (make it wider)
-             const modalContent = document.getElementById('modal-content');
-             modalContent.classList.remove('max-w-md');
-             modalContent.classList.add('max-w-xl');
-             
-             showModal();
-        }
-
-
-        function renderFilterButton(subjectName, filterType, label, icon) {
-            const isActive = currentFilters[subjectName] === filterType;
-            const baseClasses = "px-3 py-1 text-xs rounded-full transition-all flex items-center whitespace-nowrap";
-            // Filter buttons use the primary green accent
-            const activeClasses = "bg-green-600 text-white shadow-md hover:bg-green-700"; 
-            const inactiveClasses = "bg-gray-700 text-gray-200 hover:bg-gray-600";
-
-            return `
-                <button onclick="setFilter('${subjectName}', '${filterType}')" class="${baseClasses} ${isActive ? activeClasses : inactiveClasses}">
-                    <i class="${icon} ml-1"></i> ${label}
-                </button>
-            `;
-        }
-        
-        // NEW: Function to update Admin toggle UI (separated for cleanliness)
-        function updateAdminUI() {
-             const adminToggle = document.getElementById('admin-toggle');
-             if (adminToggle) {
-                 if (isAdmin) {
-                     adminToggle.innerHTML = '<i class="ph ph-sign-out text-base ml-1"></i> خروج المسؤول';
-                     adminToggle.classList.replace('text-gray-800', 'text-white');
-                     adminToggle.classList.replace('bg-white', 'bg-red-600');
-                     adminToggle.classList.replace('hover:bg-gray-200', 'hover:bg-red-700');
-                 } else {
-                     adminToggle.innerHTML = 'المسؤول';
-                     adminToggle.classList.replace('text-white', 'text-gray-800');
-                     adminToggle.classList.replace('bg-red-600', 'bg-white');
-                     adminToggle.classList.replace('hover:bg-red-700', 'hover:bg-gray-200');
-                 }
-            }
-            // Toggle visibility of the "Add Subject" button based on isAdmin state
-            const addSubjectButton = document.getElementById('add-subject-button');
-            if (addSubjectButton) {
-                addSubjectButton.classList.toggle('hidden', !isAdmin);
-            }
-        }
-
-
-        function renderApp() {
-            if (!currentData) {
-                document.getElementById('main-content').innerHTML = '<p class="text-center py-10 text-xl font-medium text-gray-500">جاري تحميل بيانات الصف...</p>';
-                return;
-            }
-            
-            updateAdminUI(); // Update Admin button status
-
-            // Get global search term
-            const globalSearchInput = document.getElementById('global-search-input');
-            const globalSearchTerm = globalSearchInput ? globalSearchInput.value.toLowerCase().trim() : '';
-
-            const content = document.getElementById('main-content');
-            let mainContentHTML = '';
-
-            const subjectKeys = SUBJECTS;
-            let allRequirementItems = [];
-            let totalTasks = 0;
-            let completedTasks = 0;
-            
-
-            // --- 1. Calculate Total and Completed Tasks ---
-            subjectKeys.forEach(subjectName => {
-                const allRequirements = currentData.subjects[subjectName] || [];
-                totalTasks += allRequirements.length;
-                const completedItems = getCompletedItems();
-                allRequirements.forEach(item => {
-                    if (completedItems.has(item.id)) {
-                        completedTasks++;
-                    }
-                });
-            });
-
-            const remainingTasks = totalTasks - completedTasks;
-            const completedPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-
-            document.getElementById('remaining-count').textContent = remainingTasks;
-            document.getElementById('completed-count').textContent = completedTasks;
-            document.getElementById('completed-percent').textContent = completedPercent + '%';
-            
-            // NEW: Update progress bar style
-            document.getElementById('progress-bar').style.width = `${completedPercent}%`;
-            // NEW: Update Footer Status
-            document.getElementById('footer-completion-status').textContent = `${completedPercent}%`;
-            document.getElementById('last-updated-display').textContent = lastUpdateTime ? `آخر تحديث: ${lastUpdateTime}` : '';
-
-            // NEW: Update motivational message
-            const motivationalMessage = document.getElementById('motivational-message');
-            if (motivationalMessage) {
-                if (totalTasks === 0) {
-                     motivationalMessage.textContent = "لا توجد متطلبات حالية. استمتع بيومك!";
-                     motivationalMessage.classList.add('text-green-300');
-                     motivationalMessage.classList.remove('text-red-300');
-                } else if (remainingTasks === 0) {
-                     motivationalMessage.textContent = "تهانينا! لقد أنجزت كل شيء. أداء رائع!";
-                     motivationalMessage.classList.add('text-green-300');
-                     motivationalMessage.classList.remove('text-red-300');
-                } else if (completedPercent >= 75) {
-                     motivationalMessage.textContent = "أنت تحقق تقدمًا ممتازًا! استمر في العمل الجيد.";
-                     motivationalMessage.classList.add('text-green-300');
-                     motivationalMessage.classList.remove('text-red-300');
-                } else {
-                     motivationalMessage.textContent = `لا يزال لديك ${remainingTasks} مهام متبقية. لديك الوقت الكافي لإنجازها!`;
-                     motivationalMessage.classList.add('text-red-300');
-                     motivationalMessage.classList.remove('text-green-300');
-                }
-            }
-
-
-            // --- 2. Render Subjects ---
-            subjectKeys.forEach(subjectName => {
-                // Ensure the subject exists in the data structure
-                if (!currentData.subjects[subjectName]) {
-                    currentData.subjects[subjectName] = [];
-                }
-                const allRequirements = currentData.subjects[subjectName];
-
-                const currentFilter = currentFilters[subjectName];
-
-                // 2.1. Separate items into Current and Archived
-                let currentItems = [];
-                let archivedItems = [];
-
-                allRequirements.forEach(item => {
-                    if (isDuePast(item.due_date)) {
-                        archivedItems.push(item);
-                    } else {
-                        currentItems.push(item);
-                    }
-                });
-
-                // 2.2. Apply global search filter
-                const searchFilter = item => {
-                    if (!globalSearchTerm) return true;
-                    const title = item.title.toLowerCase();
-                    const description = item.description.toLowerCase();
-                    return title.includes(globalSearchTerm) || description.includes(globalSearchTerm);
-                };
-
-                currentItems = currentItems.filter(searchFilter);
-                archivedItems = archivedItems.filter(searchFilter);
-
-
-                // 2.3. Apply local (subject-specific) filtering to current items
-                let filteredItems = currentItems.filter(item => {
-                    if (!currentFilter) return true; // No filter
-                    if (currentFilter === 'homework' && item.type === 'homework') return true;
-                    if (currentFilter === 'exam' && item.type === 'exam') return true; // New Exam filter
-                    if (currentFilter === 'research' && item.type === 'research') return true; // New Research filter
-                    if (currentFilter === 'brochure' && item.type === 'brochure') return true; // New Brochure filter
-                    if (currentFilter === 'pinned' && item.pinned) return true;
-                    
-                    // Added: Always show links/files/notes if they have a file/link specified
-                    if ((currentFilter === 'link' && item.type === 'link') || 
-                        (currentFilter === 'file' && item.type === 'file')) return true;
-                        
-                    // Reset filter shows all standard item types if set to 'reset' but we use 'currentFilter' being empty for that
-                    if (['homework', 'exam', 'research', 'brochure', 'pinned', 'link', 'file'].includes(currentFilter)) return false;
-                        
-                    return true;
-                });
-
-                // 2.4. Sort current items
-                filteredItems.sort((a, b) => {
-                    if (a.pinned && !b.pinned) return -1;
-                    if (!a.pinned && b.pinned) return 1;
-                    if (a.due_date && b.due_date) {
-                        return new Date(a.due_date) - new Date(b.due_date);
-                    }
-                    return 0;
-                });
-
-                // 2.5. Sort archived items (most recent first)
-                archivedItems.sort((a, b) => {
-                    if (a.due_date && b.due_date) {
-                        return new Date(b.due_date) - new Date(a.due_date);
-                    }
-                    return 0;
-                });
-
-                // Collect all current items for the 'seen' tracker
-                filteredItems.forEach(item => allRequirementItems.push(item));
-
-                // UPDATED: Filter buttons list (added file/link explicit filters)
-                const filtersHtml = `
-                    <div class="flex gap-2 mt-4 overflow-x-auto pb-2">
-                        ${renderFilterButton(subjectName, 'homework', 'الواجبات', 'ph ph-note-pencil')}
-                        ${renderFilterButton(subjectName, 'exam', 'الاختبارات', 'ph ph-book-open-text')}
-                        ${renderFilterButton(subjectName, 'research', 'البحوث', 'ph ph-magnifying-glass')}
-                        ${renderFilterButton(subjectName, 'brochure', 'المطويات', 'ph ph-article')}
-                        ${renderFilterButton(subjectName, 'file', 'الملفات/الصور', 'ph ph-file-arrow-down')}
-                        ${renderFilterButton(subjectName, 'pinned', 'المثبتة', 'ph ph-push-pin')}
-                        ${currentFilter ? renderFilterButton(subjectName, 'reset', 'إعادة تعيين', 'ph ph-x-circle') : ''}
-                    </div>
-                `;
-
-                const currentItemsHtml = filteredItems.length > 0
-                    ? filteredItems.map(item => renderRequirementCard(subjectName, item, false)).join('')
-                    : `<p class="text-sm opacity-60 italic py-4">لا توجد متطلبات مطابقة لمعايير التصفية لـ ${subjectName}.</p>`;
-
-                let adminAddButton = '';
-                if (isAdmin) {
-                    adminAddButton = `
-                        <button onclick="showAddModal('${subjectName}')" class="text-sm text-green-500 hover:text-green-700 font-semibold focus:outline-none">
-                            <i class="ph ph-plus-circle ml-1"></i>إضافة جديد
-                        </button>
-                    `;
-                }
-                
-                // Show section only if there are items or admin can add
-                if (filteredItems.length > 0 || isAdmin || archivedItems.length > 0) {
-                    mainContentHTML += `
-                        <section class="mb-12" id="subject-${subjectName.replace(/\s/g, '-')}">
-                            <div class="flex justify-between items-center mb-1 border-b pb-2" style="border-color: var(--card-border);">
-                                <h2 class="text-2xl font-bold text-gradient">${subjectName}</h2>
-                                ${adminAddButton}
-                            </div>
-                            ${filtersHtml}
-                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-4">
-                                ${currentItemsHtml}
-                            </div>
-                        </section>
-                    `;
-                }
-
-                // Render Archive Section ONLY if there are archived items matching the search
-                if (archivedItems.length > 0) {
-                    const isGlobalHidden = localStorage.getItem(GLOBAL_ARCHIVE_KEY) === 'true';
-                    const isLocalHidden = localStorage.getItem(ARCHIVE_KEY_PREFIX + subjectName) === 'false';
-                    const isVisible = isGlobalHidden ? false : !isLocalHidden;
-                    
-                    const archiveHtml = archivedItems.map(item => renderRequirementCard(subjectName, item, true)).join('');
-                    
-                    const archiveContent = isVisible ? `
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            ${archiveHtml}
-                        </div>
-                    ` : '';
-
-                    const toggleButton = isGlobalHidden ? 
-                        `<span class="text-xs text-gray-500">مخفي عالميًا</span>` : 
-                        `
-                        <button onclick="toggleArchiveVisibility('${subjectName}')" class="text-xs font-semibold text-gray-400 hover:text-green-400 transition-colors flex items-center">
-                            <i class="ph ph-${isVisible ? 'caret-up' : 'caret-down'} ml-1"></i>
-                            ${isVisible ? 'إخفاء' : 'عرض'} الأرشيف (${archivedItems.length})
-                        </button>
-                    `;
-
-                    mainContentHTML += `
-                        <section class="mb-12 border-t pt-6" style="border-color: var(--card-border);">
-                            <div class="flex items-center justify-between mb-4">
-                                <h3 class="text-xl font-bold opacity-70 flex items-center text-gray-500">
-                                    <i class="ph ph-archive ml-2"></i> أرشيف ${subjectName}
-                                </h3>
-                                ${toggleButton}
-                            </div>
-                            ${archiveContent}
-                        </section>
-                    `;
-                }
-            });
-
-            // Update main content
-            content.innerHTML = globalSearchInput.outerHTML + mainContentHTML;
-
-
-            // Mark all current items as seen after rendering, only if not Admin and not searching
-            if (!isAdmin && !globalSearchTerm && allRequirementItems.length > 0) {
-                // Use a short delay to ensure the user registers the "New" flash
-                setTimeout(() => markAllAsSeen(allRequirementItems), 500);
-            }
-        }
-
-        // --- DARK MODE LOGIC ---
-
-        window.toggleDarkMode = function() {
-            isDarkMode = !isDarkMode;
-            const body = document.body;
-            const modeIcon = document.getElementById('mode-icon');
-            const theme = isDarkMode ? 'dark' : 'light';
-
-            body.setAttribute('data-theme', theme);
-            body.classList.toggle('dark', isDarkMode);
-            localStorage.setItem(THEME_KEY, theme);
-
-            if (isDarkMode) {
-                modeIcon.classList.replace('ph-moon', 'ph-sun');
-            } else {
-                modeIcon.classList.replace('ph-sun', 'ph-moon');
-            }
-        };
-
-        // --- QR CODE LOGIC ---
-
-        window.showQrModal = function() {
-            document.getElementById('modal-content').innerHTML = `
-                <h2 class="text-xl font-bold mb-4 text-center">رمز QR للوصول السريع</h2>
-                <p class="text-center mb-4 text-sm opacity-80">امسح الرمز ضوئيًا بهاتفك للوصول المباشر إلى هذه الصفحة.</p>
-                <div id="qrcode" class="p-4 bg-white rounded-lg shadow-inner w-48 h-48 mx-auto"></div>
-                <div class="mt-6 flex justify-center">
-                    <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-200 dark:hover:bg-gray-700">إغلاق</button>
-                </div>
-            `;
-            showModal();
-
-            // Generate QR Code after modal is visible
-            new QRCode(document.getElementById("qrcode"), {
-                text: window.location.href,
-                width: 160,
-                height: 160,
-                colorDark : "#00A693", // Use green accent color
-                colorLight : "#ffffff",
-                correctLevel : QRCode.CorrectLevel.H
-            });
-        };
-
-
-        // --- MODAL CONTROLS ---
-
-        function showModal() {
-            const backdrop = document.getElementById('modal-backdrop');
-            const content = document.getElementById('modal-content');
-            backdrop.classList.remove('hidden');
-            backdrop.classList.add('flex');
-            // Animate in
-            setTimeout(() => {
-                content.classList.remove('scale-95', 'opacity-0');
-                content.classList.add('scale-100', 'opacity-100');
-            }, 10);
-        }
-
-        window.closeModal = function() {
-            const backdrop = document.getElementById('modal-backdrop');
-            const content = document.getElementById('modal-content');
-            // Animate out
-            content.classList.remove('scale-100', 'opacity-100');
-            content.classList.add('scale-95', 'opacity-0');
-            
-            // Revert modal width after file preview
-            content.classList.remove('max-w-xl');
-            content.classList.add('max-w-md');
-
-            setTimeout(() => {
-                backdrop.classList.remove('flex');
-                backdrop.classList.add('hidden');
-                document.getElementById('modal-content').innerHTML = '';
-            }, 300);
-        };
-        
-        // Show loading modal (Kept for consistency)
-        function showLoadingModal(message = 'جارٍ جلب البيانات من الخادم...') {
-            document.getElementById('loading-message').textContent = message;
-            document.getElementById('loading-modal-backdrop').classList.remove('hidden');
-            document.getElementById('loading-modal-backdrop').classList.add('flex');
-        }
-
-        // Hide loading modal
-        function hideLoadingModal() {
-            document.getElementById('loading-modal-backdrop').classList.remove('flex');
-            document.getElementById('loading-modal-backdrop').classList.add('hidden');
-        }
-
-        // NEW: Notification Function (Toast)
-        /**
-         * Shows a temporary notification toast.
-         * @param {string} message The notification message.
-         * @param {('success'|'error'|'info')} type The type of notification.
-         * @param {number} duration Duration in milliseconds.
+        /* * --- NEW UI/UX: Cosmic Launch Theme ---
          */
-        function showNotification(message, type = 'info', duration = 3000) {
-            const container = document.getElementById('notification-container');
-            const toast = document.createElement('div');
-            
-            let icon = '';
-            switch(type) {
-                case 'success': icon = '<i class="ph ph-check-circle text-lg text-green-400 ml-2"></i>'; break;
-                case 'error': icon = '<i class="ph ph-x-octagon text-lg text-red-400 ml-2"></i>'; break;
-                case 'info': icon = '<i class="ph ph-info text-lg text-blue-400 ml-2"></i>'; break;
-                default: icon = '';
-            }
 
-            toast.className = `toast ${type} flex items-center text-sm`;
-            toast.innerHTML = `${icon} <span class="flex-1">${message}</span>`;
-            
-            container.appendChild(toast);
-            
-            // Show toast
-            setTimeout(() => {
-                toast.classList.add('show');
-            }, 50);
-
-            // Hide and remove toast
-            setTimeout(() => {
-                toast.classList.remove('show');
-                setTimeout(() => {
-                    container.removeChild(toast);
-                }, 400); // Wait for transition
-            }, duration);
-        }
-        window.showNotification = showNotification; // Make global
-
-
-        // --- ADMIN LOGIN LOGIC ---
-
-        window.showAdminLoginModal = function() {
-            if (isAdmin) {
-                // If already logged in, show Admin Settings/Logout
-                showAdminSettingsModal();
-                return;
-            }
-
-            document.getElementById('modal-content').innerHTML = `
-                <h2 class="text-xl font-bold mb-4 text-center">تسجيل دخول المسؤول</h2>
-                <input type="password" id="admin-pass-input" placeholder="أدخل كلمة مرور المسؤول" class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500 mb-4" style="background-color: var(--bg-color);" />
-                <p id="admin-error" class="text-red-500 text-sm mb-4 hidden">كلمة المرور غير صحيحة. حاول مرة أخرى.</p>
-                <div class="flex justify-start space-x-3 space-x-reverse">
-                    <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إلغاء</button>
-                    <button onclick="attemptAdminLogin()" class="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors">دخول</button>
-                </div>
-            `;
-            showModal();
-        };
-
-        window.attemptAdminLogin = function() {
-            const input = document.getElementById('admin-pass-input').value;
-            const errorElement = document.getElementById('admin-error');
-            
-            if (input === ADMIN_PASS) {
-                isAdmin = true;
-                closeModal();
-                updateAdminUI(); // Update UI status immediately
-                renderApp();
-                showNotification('تم تسجيل الدخول بنجاح كمسؤول.', 'success');
-            } else {
-                errorElement.textContent = "كلمة المرور غير صحيحة. حاول مرة أخرى.";
-                errorElement.classList.remove('hidden');
-                showNotification('فشل تسجيل الدخول: كلمة مرور غير صحيحة.', 'error', 2000);
-            }
-        };
-        
-        // NEW: Admin Settings Modal (for Logout and DevTools Lock Toggle)
-        window.showAdminSettingsModal = function() {
-             if (!isAdmin) return showAdminLoginModal(); // Safety check
-
-             const isLockEnabled = localStorage.getItem(DEV_LOCK_KEY) !== 'false';
-             
-             // Dynamic buttons for deleting subjects
-             let deleteSubjectButtons = '';
-             SUBJECTS.forEach(subjectName => {
-                 const hasItems = currentData.subjects[subjectName] && currentData.subjects[subjectName].length > 0;
-                 // NEW: Only show delete button for non-empty subjects OR if explicitly allowed
-                 if (hasItems) { 
-                     const itemWarning = ` (${currentData.subjects[subjectName].length} متطلبات)`;
-                     const actionString = `confirmSubjectDeletion('${subjectName.replace(/'/g, "\\'")}', ${hasItems})`;
-
-                     deleteSubjectButtons += `
-                        <div class="flex items-center justify-between p-3 rounded-lg border" style="border-color: var(--card-border);">
-                            <span class="text-sm font-medium">${subjectName}</span>
-                            <button onclick="${actionString}" class="px-3 py-1 rounded-full text-xs font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors">
-                                <i class="ph ph-trash ml-1"></i> حذف المادة ${itemWarning}
-                            </button>
-                        </div>
-                     `;
-                 }
-             });
-             
-             if (!deleteSubjectButtons) {
-                 deleteSubjectButtons = `<p class="text-xs opacity-70 italic text-center py-2 text-gray-400">لا توجد مواد قابلة للحذف حالياً.</p>`;
-             }
-
-
-             document.getElementById('modal-content').innerHTML = `
-                <h2 class="text-xl font-bold mb-4 text-center">إعدادات المسؤول</h2>
-                <div class="space-y-4">
-                    <!-- Delete Subject Section -->
-                    <div class="p-3 border rounded-lg" style="border-color: var(--card-border);">
-                        <h3 class="text-base font-semibold text-red-400 mb-2">إدارة وحذف المواد</h3>
-                        <p class="text-xs opacity-70 mb-3">حدد المادة لحذفها بشكل دائم. **لا يمكن التراجع عن هذا الإجراء.** (يتم عرض المواد التي تحتوي على متطلبات فقط)</p>
-                        <div class="space-y-2 max-h-48 overflow-y-auto">
-                            ${deleteSubjectButtons}
-                        </div>
-                    </div>
-                    
-                    <!-- DevTools Lock Toggle -->
-                    <div class="flex items-center justify-between p-3 rounded-lg border" style="border-color: var(--card-border);">
-                        <label class="text-sm font-medium">قفل وضع المطور (DevTools)</label>
-                        <button onclick="toggleDevToolsLock()" class="px-3 py-1 rounded-full text-xs font-semibold text-white ${isLockEnabled ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}">
-                            <i class="ph ph-lock-key ml-1"></i> ${isLockEnabled ? 'تعطيل القفل' : 'تفعيل القفل'}
-                        </button>
-                    </div>
-
-                    <!-- Logout Button -->
-                    <button onclick="performAdminLogout()" class="w-full py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors">
-                        <i class="ph ph-sign-out ml-1"></i> تسجيل الخروج
-                    </button>
-                </div>
-                <div class="mt-6 flex justify-center">
-                    <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إغلاق</button>
-                </div>
-            `;
-            showModal();
-        };
-
-        window.confirmSubjectDeletion = function(subjectName, hasItems) {
-            closeModal(); // Close Admin Settings modal first
-            
-            const currentItems = currentData.subjects[subjectName];
-            // NEW: Stronger check for un-archived items
-            const unarchivedCount = currentItems.filter(item => !isDuePast(item.due_date)).length; 
-
-            let message = `هل أنت متأكد تماماً من حذف المادة **${subjectName}**؟`;
-            if (unarchivedCount > 0) {
-                 message += ` **تحذير: يوجد ${unarchivedCount} متطلب (نشط/غير منجز) سيتم حذفه بشكل دائم.**`;
-            } else if (hasItems) {
-                message += ` **سيتم حذف ${currentItems.length} متطلب (مؤرشف/منجز) مرتبط بهذه المادة بشكل دائم.**`;
-            } else {
-                 message += ` المادة فارغة حالياً.`;
-            }
-            message += ` لا يمكن التراجع عن هذا الإجراء.`;
-
-            const actionString = `performSubjectDeletion('${subjectName.replace(/'/g, "\\'")}')`;
-            
-            // Show new confirmation modal
-            showInfoModal(
-                'تأكيد حذف المادة', 
-                message, 
-                actionString, 
-                'نعم، احذف المادة', 
-                true
-            );
-        };
-        
-        window.performSubjectDeletion = function(subjectName) {
-            if (!isAdmin) {
-                showNotification("غير مصرح لك بحذف المواد.", 'error');
-                closeModal();
-                return;
-            }
-            
-            // Remove subject from global list
-            SUBJECTS = SUBJECTS.filter(s => s !== subjectName);
-
-            // Remove subject from data structure
-            const updatedSubjects = JSON.parse(JSON.stringify(currentData.subjects));
-            if (updatedSubjects[subjectName]) {
-                 // Clean up any local blob URLs associated with this subject's items
-                 updatedSubjects[subjectName].forEach(item => {
-                      if (item.file && item.file.startsWith('blob:')) {
-                            URL.revokeObjectURL(item.file);
-                      }
-                 });
-                 
-                 delete updatedSubjects[subjectName];
-            }
-            
-            // Update local and remote data
-            updateData(updatedSubjects);
-            
-            showNotification(`تم حذف المادة: ${subjectName} بنجاح.`, 'success');
-            closeModal();
-            renderApp(); // Re-render the app to reflect the deleted subject
-            // Re-open Admin Settings modal if user wants to delete more
-            setTimeout(showAdminSettingsModal, 500);
+        /* إعداد متغيرات الألوان */
+        :root {
+            /* * Light Mode (Day Sky) 
+             */
+            --color-bg: #e6f7ff; /* Sky Blue */
+            --color-card-bg: rgba(255, 255, 255, 0.7);
+            --color-card-border: rgba(0, 0, 0, 0.1);
+            --color-text-heading: #0a0a1a;
+            --color-text-muted: #3a3a5a;
+            --color-primary: #007bff; /* Bright Blue */
+            --color-primary-hover: #0056b3;
+            --color-shadow: 0 10px 30px rgba(0, 123, 255, 0.2);
+            --color-input-bg: rgba(255, 255, 255, 0.8);
+            --color-star: #0a0a1a; /* Stars are dark in light mode */
         }
 
-        
-        window.performAdminLogout = function() {
-             isAdmin = false;
-             updateAdminUI(); // Update UI status immediately
-             renderApp();
-             closeModal();
-             showNotification('تم تسجيل الخروج من وضع المسؤول.', 'info');
+        /* * Dark Mode (Night Sky) - Default
+         */
+        html.dark {
+            --color-bg: #0a0a1a; /* Deep Space Blue */
+            --color-card-bg: rgba(255, 255, 255, 0.05);
+            --color-card-border: rgba(255, 255, 255, 0.2);
+            --color-text-heading: #ffffff;
+            --color-text-muted: #a0a0c0; /* Lavender Gray */
+            --color-primary: #f000b8; /* Neon Pink */
+            --color-primary-hover: #ff3dcc;
+            --color-shadow: 0 10px 30px rgba(240, 0, 184, 0.3);
+            --color-input-bg: rgba(0, 0, 0, 0.2);
+            --color-star: #ffffff;
         }
         
-        window.toggleDevToolsLock = function() {
-            const isLockEnabled = localStorage.getItem(DEV_LOCK_KEY) !== 'false';
-            const newState = !isLockEnabled;
-            localStorage.setItem(DEV_LOCK_KEY, newState ? 'true' : 'false');
-            
-            showNotification(`تم ${newState ? 'تفعيل' : 'تعطيل'} قفل وضع المطور.`, 'info');
-            
-            // Re-render modal to show new state
-            showAdminSettingsModal();
-        };
-
-        // --- ADD SUBJECT LOGIC ---
+        /* إعداد الخطوط والخلفية */
+        @import url('https://fonts.googleapis.com/css2?family=Almarai:wght@400;700;800&display=swap');
         
-        window.showAddSubjectModal = function() {
-             document.getElementById('modal-content').innerHTML = `
-                <h2 class="text-xl font-bold mb-4 text-center">إضافة مادة جديدة</h2>
-                <input type="text" id="new-subject-input" placeholder="أدخل اسم المادة الجديدة (مثال: البرمجة)" class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500 mb-4" style="background-color: var(--bg-color);" />
-                <p id="subject-error" class="text-red-500 text-sm mb-4 hidden">اسم المادة مطلوب.</p>
-                <div class="flex justify-start space-x-3 space-x-reverse">
-                    <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إلغاء</button>
-                    <button onclick="attemptAddSubject()" class="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors">إضافة</button>
-                </div>
-            `;
-            showModal();
-        };
-
-        window.attemptAddSubject = function() {
-            const input = document.getElementById('new-subject-input').value.trim();
-            const errorElement = document.getElementById('subject-error');
-            
-            if (!input) {
-                errorElement.textContent = "اسم المادة لا يمكن أن يكون فارغًا.";
-                errorElement.classList.remove('hidden');
-                return;
-            }
-            
-            if (SUBJECTS.includes(input)) {
-                 errorElement.textContent = "هذه المادة موجودة بالفعل.";
-                 errorElement.classList.remove('hidden');
-                 return;
-            }
-            
-            // Add subject locally to global list
-            SUBJECTS.push(input);
-
-            // Update data structure in currentData for the new subject with an empty array
-            const updatedSubjects = { ...currentData.subjects, [input]: [] };
-            
-            // Update local and remote data
-            updateData({ ...currentData, subjects: updatedSubjects });
-            
-            showNotification(`تمت إضافة المادة: ${input}.`, 'success');
-            closeModal();
-            renderApp(); // Re-render to show the new subject section
+        body {
+            font-family: 'Almarai', sans-serif;
+            transition: background-color 0.5s ease;
+            position: relative;
+            overflow: hidden; /* إخفاء النجوم الزائدة */
+            background-color: var(--color-bg); 
+            color: var(--color-text-muted);
         }
 
-        // --- ADMIN CRUD LOGIC (simplified) ---
+        /* * --- New Animated Starry Background ---
+         */
+        @keyframes moveUp {
+            100% { transform: translateY(-100vh); }
+        }
+        .stars-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            z-index: 0;
+            pointer-events: none;
+        }
+        .star {
+            position: absolute;
+            background-color: var(--color-star);
+            border-radius: 50%;
+            animation: moveUp 20s linear infinite;
+        }
 
-        function updateData(updatedSubjects) {
-            const newConfig = { ...currentData, subjects: updatedSubjects };
-            currentData = newConfig; // Update local state immediately
-            updateJsonBinData(newConfig); // Async update to JSONBin
+        /* حركة الدخول السلسة للبطاقة */
+        .animate-fade-in {
+            animation: fadeIn 1.5s ease-out 0.5s forwards; /* Added delay */
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px) scale(0.95); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
         }
         
-        // Helper function to clean item data before saving (IMPROVED)
-        function cleanItemData(item) {
-            const cleaned = {};
-            // Ensure essential fields are not null/undefined
-            cleaned.title = item.title ? item.title.trim() : 'متطلب بدون عنوان';
-            cleaned.description = item.description ? item.description.trim() : '';
-            cleaned.due_date = item.due_date || '';
-            cleaned.type = item.type || 'note';
-            cleaned.id = item.id;
-            cleaned.pinned = !!item.pinned; // Convert to strict boolean
-
-            // File/Link fields
-            cleaned.file = item.file || '';
-            cleaned.file_display_name = item.file_display_name ? item.file_display_name.trim() : '';
-
-            // Ensure display name is set if file exists but display name is empty
-            if (cleaned.file && !cleaned.file_display_name) {
-                 cleaned.file_display_name = getFileDisplayInfo(cleaned.file).displayName || 'ملف مرفق';
-            }
-            return cleaned;
+        /* * --- New Glassmorphism Card ---
+         */
+        #main-card {
+            background-color: var(--color-card-bg);
+            border: 1px solid var(--color-card-border); 
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            box-shadow: 0 20px 25px -5px var(--color-shadow);
+            transition: all 0.5s ease;
+        }
+        #main-card:hover {
+            box-shadow: 0 25px 40px -5px var(--color-shadow), 0 0 0 4px var(--color-primary); 
         }
 
-        window.showAddModal = function(subjectName) {
-            const item = {
-                title: '', description: '', due_date: '', type: 'homework', file: '', pinned: false, isNew: true, subjectName: subjectName, file_display_name: ''
-            };
-            renderEditModal(item);
-        };
+        /* --- Rocket Animation (REMOVED) --- */
+        /*
+        #rocket-icon {
+            animation: bobble 3s ease-in-out infinite;
+        }
+        @keyframes bobble {
+            0% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
+            100% { transform: translateY(0); }
+        }
+        */
 
-        window.showEditModal = function(subjectName, itemId) {
-            // Find the current item data and pass it
-            const currentItem = currentData.subjects[subjectName].find(item => item.id === itemId);
-            if (currentItem) {
-                renderEditModal({ ...currentItem, isNew: false, subjectName: subjectName });
-            }
-        };
+        /* --- New Form Styles (REMOVED) --- */
+        /*
+        .notify-input {
+            background-color: var(--color-input-bg);
+            border: 1px solid var(--color-card-border);
+            color: var(--color-text-heading);
+            transition: all 0.3s ease;
+        }
+        .notify-input:focus {
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px var(--color-primary);
+            outline: none;
+        }
+        .notify-button {
+            background-color: var(--color-primary);
+            color: white;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        .notify-button:hover {
+            background-color: var(--color-primary-hover);
+            transform: scale(1.03);
+        }
+        */
 
-        function renderEditModal(item) {
-            const typeOptions = Object.keys(TYPE_MAP).map(key => `<option value="${key}" ${key === item.type ? 'selected' : ''}>${TYPE_MAP[key]}</option>`).join('');
-            const subjectOptions = SUBJECTS.map(s => `<option value="${s}" ${s === item.subjectName ? 'selected' : ''}>${s}</option>`).join('');
+    </style>
+    
+    <script>
+        function applyTheme(theme) {
+            const html = document.documentElement;
+            const toggleIcon = document.getElementById('theme-toggle-icon');
             
-            // Get file name for display if it's a local Blob URL
-            const fileInfo = getFileDisplayInfo(item.file);
-            const currentFileName = item.file ? `${fileInfo.icon} ${fileInfo.displayName} (${item.file.startsWith('blob:') ? 'محلي' : 'خارجي'})` : '';
+            html.classList.remove('dark', 'light');
+            html.classList.add(theme);
+            localStorage.setItem('theme', theme);
 
-            // NEW: Clear file button
-            const clearFileButton = item.file ? `
-                 <button type="button" onclick="clearFileSelection()" class="mt-2 text-xs text-red-500 hover:text-red-400 font-medium flex items-center">
-                    <i class="ph ph-x-circle ml-1"></i> مسح الملف/الرابط الحالي
-                 </button>
-            ` : '';
-
-
-            document.getElementById('modal-content').innerHTML = `
-                <h2 class="text-xl font-bold mb-4 text-center">${item.isNew ? 'إضافة متطلب جديد' : 'تعديل المتطلب'}</h2>
-                <form id="requirement-form" onsubmit="event.preventDefault(); saveRequirement('${item.id || ''}', ${item.isNew}, '${item.file || ''}')">
-
-                    <label for="modal-subject" class="block text-sm font-medium mb-1 mt-3">المادة</label>
-                    <select id="modal-subject" name="subjectName" required class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);">${subjectOptions}</select>
-
-                    <label for="modal-title" class="block text-sm font-medium mb-1 mt-3">العنوان</label>
-                    <input type="text" id="modal-title" name="title" value="${item.title || ''}" required class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);" />
-
-                    <label for="modal-description" class="block text-sm font-medium mb-1 mt-3">الوصف</label>
-                    <textarea id="modal-description" name="description" rows="2" required class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);">${item.description || ''}</textarea>
-
-                    <div class="flex space-x-4 flex-row-reverse space-x-reverse">
-                        <div class="flex-1">
-                            <label for="modal-type" class="block text-sm font-medium mb-1 mt-3">النوع</label>
-                            <select id="modal-type" name="type" required class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);">${typeOptions}</select>
-                        </div>
-                        <div class="flex-1">
-                            <label for="modal-date" class="block text-sm font-medium mb-1 mt-3">تاريخ الاستحقاق (اختياري)</label>
-                            <input type="date" id="modal-date" name="due_date" value="${item.due_date || ''}" class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);" />
-                        </div>
-                    </div>
-                    
-                    ${item.file ? `<p id="current-file-display" class="text-xs text-gray-500 mt-3 flex items-center">الملف الحالي: <span class="mr-1 ${item.file.startsWith('blob:') ? 'text-yellow-500' : 'text-green-500'}">${currentFileName}</span></p>` : ''}
-                    ${clearFileButton}
-
-                    <!-- NEW FIELD: File Display Name -->
-                    <label for="modal-file-display-name" class="block text-sm font-medium mb-1 mt-3">اسم الملف المعروض (مثال: صورة الكويكب)</label>
-                    <input type="text" id="modal-file-display-name" name="file_display_name" value="${item.file_display_name || ''}" placeholder="اسم الرابط الذي سيظهر للطالب" class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);" />
-
-
-                    <label for="modal-link" class="block text-sm font-medium mb-1 mt-3">رابط خارجي (اختياري)</label>
-                    <textarea id="modal-link" name="fileLink" rows="3" placeholder="أدخل رابط PDF, ZIP, PNG, أو رابط خارجي ثابت..." class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500" style="background-color: var(--bg-color);">${item.file && !item.file.startsWith('blob:') ? item.file : ''}</textarea>
-
-                    <label for="modal-file" class="block text-sm font-medium mb-1 mt-3">أو قم بتحميل ملف/صورة **محلي** (اختياري)</label>
-                    <input type="file" id="modal-file" name="file" class="w-full p-3 rounded-lg border border-gray-600 focus:ring-green-500 focus:border-green-500 file:ml-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100" style="background-color: var(--bg-color);" />
-                    
-                    <p class="text-xs text-yellow-600 mt-1">
-                        **تنبيه**: الملفات المحلية لن تعمل إذا تم إغلاق المتصفح أو إعادة تشغيله. يجب استخدام رابط خارجي ثابت.
-                    </p>
-
-                    <div class="mt-4 flex items-center justify-end">
-                        <label for="modal-pinned" class="mr-2 text-sm font-medium">تثبيت العنصر (يعرض في الأعلى)</label>
-                        <input type="checkbox" id="modal-pinned" name="pinned" ${item.pinned ? 'checked' : ''} class="w-4 h-4 text-green-600 border-gray-600 rounded focus:ring-green-500 dark:focus:ring-green-600 dark:ring-offset-gray-800 dark:bg-gray-700">
-                    </div>
-
-                    <div class="mt-6 flex justify-start space-x-3 space-x-reverse">
-                        <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إلغاء</button>
-                        <button type="submit" id="save-button" class="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors">حفظ</button>
-                    </div>
-                </form>
-            `;
-            showModal();
-        }
-        
-        // NEW: Function to clear file/link input
-        window.clearFileSelection = function() {
-            // Clear file input
-            document.getElementById('modal-file').value = '';
-            // Clear link input
-            document.getElementById('modal-link').value = '';
-            // Update UI feedback (hide current file display)
-            const currentFileDisplay = document.getElementById('current-file-display');
-            if(currentFileDisplay) currentFileDisplay.remove();
-            showNotification('تم مسح الملف/الرابط الحالي مؤقتاً. اضغط حفظ لتأكيد التغيير.', 'info', 3000);
-        }
-
-
-        // Simplified local file handling (no external upload, no deletion logic)
-        async function handleLocalFileUpload(file) {
-            return new Promise((resolve) => {
-                if (file) {
-                    // Create temporary Blob URL
-                    const localUrl = URL.createObjectURL(file);
-                    resolve(localUrl);
+            // تحديث أيقونة التبديل
+            if (toggleIcon) { 
+                if (theme === 'dark') {
+                    toggleIcon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />`;
                 } else {
-                    resolve('');
+                    toggleIcon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />`;
+                }
+            }
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            applyTheme(newTheme);
+        }
+
+        // --- Anti Dev-Tools Script ---
+        function setupAntiDevTools() {
+            document.addEventListener('contextmenu', e => e.preventDefault());
+            document.addEventListener('keydown', e => {
+                if (e.key === 'F12' || 
+                    (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) || 
+                    (e.ctrlKey && e.key === 'U')) {
+                    e.preventDefault();
                 }
             });
         }
+        // --- End Anti Dev-Tools Script ---
 
-
-        window.saveRequirement = async function(itemId, isNew, oldFileUrl) {
-            const form = document.getElementById('requirement-form');
-            const formData = new FormData(form);
-            let newItem = {};
-            const fileInput = document.getElementById('modal-file');
-            const file = fileInput.files[0];
-            
-            const finalItemId = isNew ? crypto.randomUUID() : itemId;
-            let newFileUrl = oldFileUrl || ''; 
-            
-            // 1. Process Form Data
-            for (const [key, value] of formData.entries()) {
-                if (key !== 'file') {
-                    if (key === 'pinned') {
-                        newItem[key] = true; 
-                    } else if (key === 'fileLink') {
-                        // External Link takes priority over old file or new local upload
-                        if (value) {
-                             newFileUrl = value;
-                        } else if (!file && !document.getElementById('modal-link').value) {
-                             // User cleared the external link AND didn't upload a new file, clear it
-                             newFileUrl = '';
-                        }
-                    } else {
-                        newItem[key] = value;
-                    }
-                }
+        // --- New Star Background Generator ---
+        function createStars() {
+            const container = document.getElementById('stars-container');
+            if (!container) return;
+            const starCount = 100; // عدد النجوم
+            for (let i = 0; i < starCount; i++) {
+                const star = document.createElement('div');
+                star.classList.add('star');
+                const size = Math.random() * 3 + 1; // حجم النجم
+                star.style.width = `${size}px`;
+                star.style.height = `${size}px`;
+                star.style.top = `${Math.random() * 100}vh`;
+                star.style.left = `${Math.random() * 100}vw`;
+                star.style.animationDelay = `${Math.random() * 20}s`; // تأخير مختلف
+                container.appendChild(star);
             }
-            newItem.pinned = !!newItem.pinned;
-
-            // 2. Handle Local File Upload (Instant)
-            if (file) {
-                 // Clean up previous blob URL if exists for this item
-                if (oldFileUrl.startsWith('blob:')) {
-                    URL.revokeObjectURL(oldFileUrl);
-                }
-                newFileUrl = await handleLocalFileUpload(file);
-            } else if (!document.getElementById('modal-link').value) {
-                // If no new file and no external link, ensure old local blob is revoked/cleared
-                if (oldFileUrl.startsWith('blob:')) {
-                    URL.revokeObjectURL(oldFileUrl);
-                }
-                newFileUrl = '';
-            }
-            
-            newItem.file = newFileUrl; // Assign the final file URL
-            newItem.file_display_name = formData.get('file_display_name') || ''; // NEW: Capture custom display name
-
-
-            // 3. Clean and Save to Data Store
-            newItem = cleanItemData(newItem);
-            
-            const currentSubjectName = formData.get('subjectName');
-            const updatedSubjects = JSON.parse(JSON.stringify(currentData.subjects));
-            
-            newItem.id = finalItemId;
-
-            if (isNew) {
-                // ADD
-                updatedSubjects[currentSubjectName] = updatedSubjects[currentSubjectName] || [];
-                updatedSubjects[currentSubjectName].push(newItem);
-                showNotification(`تمت إضافة المتطلب: ${newItem.title}.`, 'success');
-            } else {
-                // EDIT (Logic for moving or updating item)
-                let itemFound = false;
-                let oldSubjectName = null;
-                for (const subj of SUBJECTS) {
-                    const index = updatedSubjects[subj].findIndex(item => item.id === finalItemId);
-                    if (index !== -1) {
-                        oldSubjectName = subj;
-                        if (subj === currentSubjectName) {
-                            updatedSubjects[subj][index] = newItem;
-                            showNotification(`تم تحديث المتطلب: ${newItem.title}.`, 'success');
-                        } else {
-                            updatedSubjects[subj].splice(index, 1);
-                            updatedSubjects[currentSubjectName].push(newItem);
-                            showNotification(`تم نقل وتحديث المتطلب: ${newItem.title} إلى ${currentSubjectName}.`, 'info');
-                        }
-                        itemFound = true;
-                        break;
-                    }
-                }
-                if (!itemFound) {
-                    updatedSubjects[currentSubjectName].push(newItem);
-                    showNotification(`تمت إضافة المتطلب: ${newItem.title}.`, 'success');
-                }
-            }
-            
-            const subjectId = currentSubjectName.replace(/\s/g, '-');
-            
-            updateData(updatedSubjects); // Uses the new JSONBin update logic
-            closeModal(); 
-            
-            // NEW: Scroll to and highlight the updated/added section
-            setTimeout(() => {
-                const targetElement = document.getElementById(`subject-${subjectId}`);
-                if (targetElement) {
-                    targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-            }, 350); 
-        };
-
-        // --- FIX START: Deletion logic refactor ---
-
-        // 1. New global function to perform the actual deletion (non-confirming)
-        async function performConfirmedDeletion(subjectName, itemId) {
-            const updatedSubjects = JSON.parse(JSON.stringify(currentData.subjects));
-            let deletedItemTitle = "متطلب"; // Default title
-
-            // Find and remove the item
-            let itemFound = false;
-            for (const subj of SUBJECTS) {
-                const index = updatedSubjects[subj].findIndex(item => item.id === itemId);
-                if (index !== -1) {
-                    const itemToDelete = updatedSubjects[subj][index];
-                    deletedItemTitle = itemToDelete.title;
-                    
-                    // Cleanup local blob URL if it was used
-                    if (itemToDelete.file && itemToDelete.file.startsWith('blob:')) {
-                        URL.revokeObjectURL(itemToDelete.file);
-                    }
-                    
-                    // Remove item from data structure
-                    updatedSubjects[subj].splice(index, 1);
-                    itemFound = true;
-                    break;
-                }
-            }
-
-            if (itemFound) {
-                updateData(updatedSubjects);
-                showNotification(`تم حذف المتطلب: ${deletedItemTitle}.`, 'info');
-            } else {
-                 console.warn(`Item ID ${itemId} not found for deletion.`);
-                 showNotification("فشل الحذف. لم يتم العثور على المتطلب.", 'error');
-            }
-
-            closeModal();
         }
-
-        // 2. Updated deleteRequirement function to use the new global function and pass arguments as string
-        window.deleteRequirement = function(subjectName, itemId, shouldConfirm = false) {
+        
+        /* --- New Form Handler (REMOVED) --- */
+        /*
+        function handleNotify(event) {
+            event.preventDefault(); // منع إرسال الفورم
+            const formContainer = document.getElementById('form-container');
+            const emailInput = document.getElementById('email-input');
             
-            if (shouldConfirm) {
-                 // Find the item to confirm deletion
-                const item = currentData.subjects[subjectName].find(i => i.id === itemId);
-                if (!item) {
-                     console.error("Attempted to delete non-existent item:", itemId);
-                     showNotification("لا يمكن الحذف: المتطلب غير موجود.", 'error');
-                     return;
-                }
-                
-                let message = `هل أنت متأكد من رغبتك في حذف المتطلب: **${item.title}**؟`;
-                if (item.file && item.file.startsWith('blob:')) {
-                    message += ` **سيتم إلغاء الرابط المحلي للملف المرفق.**`;
-                }
-                
-                // FIX: Pass the action as a string that correctly quotes the subjectName and itemId.
-                // This ensures the action executes in the global scope with the correct data.
-                const actionString = `performConfirmedDeletion('${subjectName.replace(/'/g, "\\'")}', '${itemId.replace(/'/g, "\\'")}')`;
-                
-                showInfoModal(
-                    'تأكيد الحذف', 
-                    message, 
-                    actionString, // Passing the raw string now
-                    'نعم، احذف', 
-                    true
-                );
-            } else {
-                // Immediate deletion path (not used in UI, but kept for consistency)
-                performConfirmedDeletion(subjectName, itemId);
-            }
-        };
-
-        // 3. Updated showInfoModal to handle string action
-        function showInfoModal(title, message, confirmAction = null, confirmText = 'OK', isDestructive = false) {
-            const content = document.getElementById('modal-content');
-
-            let buttons = `
-                <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إغلاق</button>
-            `;
-
-            if (confirmAction) {
-                const confirmClass = isDestructive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700';
-                
-                let onClickAction;
-                if (typeof confirmAction === 'string') {
-                    // FIX: If action is a string, use it directly (the string must be a global function call)
-                    onClickAction = confirmAction;
-                } else {
-                    // Original behavior for function object (still less safe, but kept for compatibility)
-                    onClickAction = `confirmActionWrapper(${confirmAction.toString()})`;
-                }
-
-                buttons = `
-                    <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm transition-colors hover:bg-gray-700">إلغاء</button>
-                    <button onclick="${onClickAction}" class="px-4 py-2 rounded-lg text-sm font-semibold text-white ${confirmClass} transition-colors">${confirmText}</button>
+            if (emailInput.value && emailInput.checkValidity()) {
+                formContainer.innerHTML = `
+                    <div class="text-center">
+                        <h3 class="text-2xl font-bold text-[var(--color-primary)] mb-2">شكراً لك!</h3>
+                        <p class="text-lg text-[var(--color-text-heading)]">
+                            لقد تم تسجيل بريدك. سنعلمك فور الانطلاق!
+                        </p>
+                    </div>
                 `;
+            } else {
+                // يمكن إضافة رسالة خطأ هنا إذا أردت
+                emailInput.focus();
+            }
+        }
+        */
+
+
+        // --- Window Onload ---
+        window.onload = function() {
+            let preferredTheme = localStorage.getItem('theme');
+            if (!preferredTheme) {
+                // الوضع الليلي هو الافتراضي
+                preferredTheme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+            }
+            applyTheme(preferredTheme);
+            
+            const mainCard = document.getElementById('main-card');
+            if (mainCard) {
+                mainCard.classList.add('animate-fade-in');
             }
 
-            content.innerHTML = `
-                <h2 class="text-xl font-bold mb-4">${title}</h2>
-                <p class="mb-6 text-sm opacity-90">${message.replace(/\*\*/g, '<b>').replace(/\*\*/g, '</b>')}</p>
-                <div class="flex justify-start space-x-3 space-x-reverse">${buttons}</div>
-            `;
-            showModal();
-        }
-
-        // Keeping confirmActionWrapper for backward compatibility, although the new deletion path bypasses it.
-        window.confirmActionWrapper = function(func) {
-            func(); // Execute the wrapped function
-            // Note: The function itself is responsible for calling closeModal() if needed.
-        }
-
-        // --- FIX END: Deletion logic refactor ---
-
-        // --- ANTI-INSPECT / DEV TOOLS LOCK ---
-
-        function isDevLockEnabled() {
-            // Default is enabled (return true unless explicitly set to 'false')
-            return localStorage.getItem(DEV_LOCK_KEY) !== 'false';
-        }
-        
-        function initDevToolsLock() {
-            const overlay = document.getElementById('anti-inspect-overlay');
-
-            // Simple check using console print time (a common trick)
-            const checkDevTools = () => {
-                if (!isDevLockEnabled()) {
-                    overlay.style.display = 'none';
-                    return;
-                }
-                
-                const threshold = 160; // Milliseconds threshold
-                let i = 0;
-                const startTime = performance.now();
-                // eslint-disable-next-line no-debugger
-                debugger; // Intentional debugger to halt on DevTools open
-                const endTime = performance.now();
-
-                // If DevTools is open, the debugger line will cause a large time gap
-                if (endTime - startTime > threshold) {
-                    overlay.style.display = 'flex';
-                } else {
-                    overlay.style.display = 'none';
-                }
-            };
-
-            // Re-check periodically
-            setInterval(checkDevTools, 500);
-
-            // Hide the overlay if the user closes the DevTools
-            window.addEventListener('resize', () => {
-                 // Only hide if the lock is disabled or on resize (assuming user might be resizing the console)
-                 if (!isDevLockEnabled()) {
-                      overlay.style.display = 'none';
-                 }
-            });
+            setupAntiDevTools();
+            createStars(); // إنشاء النجوم
             
-             // Initial check
-             if (isDevLockEnabled()) {
-                 // Check immediately on load too
-                 checkDevTools();
-             }
-        }
-
-
-        // --- ENTRY POINT ---
-        window.onload = function() {
-            // DevTools lock must be initialized and checked before other app logic
-            initDevToolsLock(); // Start anti-inspect feature
-            initApp();          // Initialize JSONBin data listener
-            // Theme setup is handled in initApp based on localStorage or default
+            /* --- Form Link (REMOVED) --- */
+            /*
+            // ربط الفورم
+            const notifyForm = document.getElementById('notify-form');
+            if (notifyForm) {
+                notifyForm.addEventListener('submit', handleNotify);
+            }
+            */
         };
     </script>
+</head>
+
+<body id="theme-body" class="min-h-screen flex items-center justify-center p-4">
+    
+    <!-- حاوية النجوم المتحركة -->
+    <div id="stars-container" class="stars-container"></div>
+
+    <!-- حاوية البطاقة الرئيسية -->
+    <div id="main-card" class="relative z-10 w-full max-w-2xl rounded-2xl p-8 md:p-12 text-center opacity-0 
+            transform transition duration-500" 
+            style="box-shadow: 0 20px 25px -5px var(--color-shadow)">
+
+        <!-- زر التبديل بين الثيمات -->
+        <button onclick="toggleTheme()" class="absolute top-4 left-4 p-2 rounded-full transition duration-300 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10" aria-label="تبديل الثيم">
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <g id="theme-toggle-icon"></g>
+            </svg>
+        </button>
+
+        <!-- ★★★ NEW LOGO ★★★ -->
+        <!-- (Replaced rocket icon) -->
+        <svg class="mx-auto h-20 w-20 text-[var(--color-primary)] mb-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round">
+            <!-- 'C' - Outer Arc -->
+            <path d="M19.07 4.93a10 10 0 0 0-14.14 0" />
+            <!-- 'B' - Middle Arc -->
+            <path d="M16.24 7.76a6 6 0 0 0-8.48 0" />
+            <!-- 'S' - Center Dot -->
+            <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/>
+        </svg>
+
+        <!-- العنوان الرئيسي -->
+        <h1 id="main-heading" class="text-4xl md:text-5xl font-extrabold mb-4 leading-tight text-[var(--color-text-heading)]">
+            نستعد للانطلاق!
+        </h1>
+
+        <!-- ★★★ UPDATED TEXT ★★★ -->
+        <p class="text-lg mb-8 max-w-xl mx-auto text-[var(--color-text-muted)]">
+            نحن نعمل بجد لوضع اللمسات الأخيرة. ترقبوا انطلاقتنا!
+        </p>
+
+        <!-- ★★★ REMOVED FORM ★★★ -->
+        <!--
+        <div id="form-container" class="mt-8 max-w-lg mx-auto">
+            <form id="notify-form" class="flex flex-col sm:flex-row gap-3">
+                <input 
+                    type="email" 
+                    id="email-input"
+                    placeholder="بريدك الإلكتروني..." 
+                    required
+                    class="notify-input flex-grow w-full px-5 py-3 rounded-lg text-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50"
+                />
+                <button 
+                    type="submit" 
+                    class="notify-button px-8 py-3 rounded-lg font-bold text-lg shadow-lg">
+                    أعلمني
+                </button>
+            </form>
+        </div>
+        -->
+
+    </div>
+
 </body>
 </html>
+
