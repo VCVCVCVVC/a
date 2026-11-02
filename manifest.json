@@ -1,0 +1,19 @@
+{
+  "name": "Q2a1 Mega All-In-One + OpenSub (AR)",
+  "version": "2.5",
+  "scrapers": [
+    {
+      "id": "q2a1-mega-aio",
+      "name": "⚡ Mega All-In-One + OpenSubtitles (AR)",
+      "description": "يدمج 25+ مصدر (4K/1080p + أنمي + عربي) مع سحب تلقائي لترجمة OpenSubtitles العربية (~6s)",
+      "version": "2.5",
+      "author": "Q2a1",
+      "supportedTypes": ["movie", "tv", "anime"],
+      "filename": "aio-mega.js",
+      "enabled": true,
+      "formats": ["m3u8", "mp4", "mkv"],
+      "logo": "https://www.opensubtitles.org/favicon.ico",
+      "contentLanguage": ["ar", "en", "ja", "hi", "fr", "es", "tr"]
+    }
+  ]
+}
