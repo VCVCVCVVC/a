@@ -3,7 +3,6 @@
 // =========================================================================
 
 const UPSTREAM_URL = process.env.UPSTREAM_URL || "https://torrentio.strem.fun/qualityfilter=scr,cam|torbox=3183a8fd-2d85-41fb-a58d-39c5737efae3";
-const OPENSUBTITLES_API_KEY = process.env.OPENSUBTITLES_API_KEY || "";
 const CACHE_TTL = 25 * 60 * 1000;
 const STALE_TTL = 90 * 60 * 1000;
 const TIMEOUT_MS = 4500;
@@ -27,7 +26,6 @@ const UPSTREAM_ADDONS = {
   // مصادر الترجمة العربية المعتمدة
   subdl: "https://subdl.strem.fun",
   opensubtitlesV3: "https://opensubtitles-v3.strem.io",
-  subscene: "https://subscene.strem.fun",
   yifysubs: "https://yifysubtitles.strem.fun"
 };
 
@@ -421,149 +419,6 @@ async function localizeCatalogList(items, type = "movie") {
   return { items: prepared, complete };
 }
 
-// =========================================================================
-// 3.1 المسلسلات العربية: تُحلّ وقت التشغيل بالاسم العربي والسنة (لا معرّفات مخمّنة)
-// =========================================================================
-// كل عنصر: الاسم العربي + سنة الإنتاج (+ اسم لاتيني اختياري كاحتياط).
-// imdb اختياري ولا يُستخدم إلا بعد التحقق من السنة. plot احتياطي فقط
-// ويُستعمل إذا لم يوفر TMDB قصة عربية. حذفنا القصص التي لم نتأكد منها.
-const ARABIC_SERIES_CURATED = {
-  general: [
-    { ar: "ما وراء الطبيعة", year: 2020, imdb: "tt12411074", en: "Paranormal", genres: ["دراما", "غموض", "رعب"],
-      plot: "في ستينيات القرن الماضي، يعيش الطبيب رفعت إسماعيل أستاذ أمراض الدم سلسلة من الأحداث الخارقة للطبيعة التي تقلب قناعاته العلمية رأساً على عقب." },
-    { ar: "الحشاشين", year: 2024, imdb: "tt21200366", en: "El Hashashin", genres: ["تاريخي", "دراما", "حركة وإثارة"],
-      plot: "في القرن الحادي عشر، يقود حسن الصباح طائفة الحشاشين التي اشتهرت بتنفيذ عمليات اغتيال لشخصيات بارزة في زمنها." },
-    { ar: "الكبير أوي", year: 2010, en: "El Kbeer Awi", genres: ["كوميديا", "عائلي"] },
-    { ar: "الاختيار", year: 2020, en: "El Ekhtiar", genres: ["حركة وإثارة", "دراما"] },
-    { ar: "لعبة نيوتن", year: 2021, en: "Newton's Game", genres: ["دراما", "إثارة"] },
-    { ar: "تحت الوصاية", year: 2023, en: "Taht El Wesaya", genres: ["دراما"] },
-    { ar: "الهيبة", year: 2017, en: "Al Hayba", genres: ["حركة وإثارة", "جريمة", "دراما"] },
-    { ar: "مدرسة الروابي للبنات", year: 2021, en: "AlRawabi School for Girls", genres: ["دراما", "إثارة"] },
-    { ar: "جن", year: 2019, en: "Jinn", genres: ["رعب", "دراما"] },
-    { ar: "الصفارة", year: 2023, en: "El Safara", genres: ["كوميديا", "فانتازيا"] },
-    { ar: "ممالك النار", year: 2019, en: "Kingdoms of Fire", genres: ["تاريخي", "دراما"] },
-    { ar: "موسى", year: 2021, en: "Moussa", genres: ["حركة وإثارة", "دراما"] },
-    { ar: "جعفر العمدة", year: 2023, en: "Gaafar El Omda", genres: ["دراما", "حركة وإثارة"] },
-    { ar: "كلبش", year: 2017, en: "Kalabsh", genres: ["حركة وإثارة", "دراما"] },
-    { ar: "فاتن أمل حربي", year: 2022, en: "Faten Amal Harby", genres: ["دراما"] },
-    { ar: "باب الحارة", year: 2006, en: "Bab Al-Hara", genres: ["دراما", "تاريخي"] },
-    { ar: "التغريبة الفلسطينية", year: 2004, en: "Al-Taghreeba Al-Filistiniya", genres: ["دراما", "تاريخي"] },
-    { ar: "ضيعة ضايعة", year: 2008, en: "Dayaa Dayaa", genres: ["كوميديا", "دراما"] },
-    { ar: "ليالي الحلمية", year: 1987, en: "Layali El Helmeya", genres: ["دراما", "تاريخي"] }
-  ],
-  gulf: [
-    { ar: "رشاش", year: 2021, en: "Rashash", genres: ["جريمة", "حركة وإثارة", "دراما"] },
-    { ar: "العاصوف", year: 2018, en: "Al Asouf", genres: ["دراما", "تاريخي"] },
-    { ar: "سيلفي", year: 2015, en: "Selfie", genres: ["كوميديا", "دراما"] },
-    { ar: "خيوط المعازيب", year: 2024, en: "Khyoot Al Maazeeb", genres: ["تاريخي", "دراما"] },
-    { ar: "محامي الشيطان", year: 2023, en: "Devil's Advocate", genres: ["جريمة", "غموض", "إثارة"] },
-    { ar: "من شارع الهرم إلى", year: 2022, en: "Min Share3 El Haram", genres: ["دراما", "كوميديا"] },
-    { ar: "اختطاف", year: 2021, en: "Ekhtetaf", genres: ["إثارة", "دراما", "غموض"] },
-    { ar: "دفعة القاهرة", year: 2019, en: "Dofaat El Qahira", genres: ["دراما", "تاريخي"] },
-    { ar: "طاش ما طاش", year: 1993, en: "Tash Ma Tash", genres: ["كوميديا"] },
-    { ar: "أم هارون", year: 2020, en: "Umm Haroun", genres: ["دراما", "تاريخي"] },
-    { ar: "شارع الأعشى", year: 2018, en: "Share3 Al Aasha", genres: ["دراما", "رومانسي"] },
-    { ar: "غرابيب سود", year: 2017, en: "Gharabeeb Soud", genres: ["دراما", "حركة وإثارة"] }
-  ]
-};
-
-const RESOLVE_TTL = 12 * 60 * 60 * 1000;
-const MISS_TTL = 10 * 60 * 1000;
-const resolvedSeries = new Map();
-const CURATED_BY_ID = new Map(); // tt... => { name, plot } لاستخدامه في صفحة التفاصيل
-
-// تعبئة مسبقة للمعرّفات الموثّقة لتعمل صفحة التفاصيل حتى بعد إعادة تشغيل الخادم
-for (const group of Object.values(ARABIC_SERIES_CURATED)) {
-  for (const e of group) if (e.imdb) CURATED_BY_ID.set(e.imdb, { name: e.ar, plot: e.plot || "" });
-}
-
-function yearOf(m) {
-  const y = String(m?.releaseInfo || m?.year || "").match(/\d{4}/);
-  return y ? parseInt(y[0], 10) : 0;
-}
-
-async function resolveArabicSeries(entry) {
-  const key = `${entry.ar}|${entry.year}`;
-  const hit = resolvedSeries.get(key);
-  if (hit && Date.now() - hit.time < (hit.data ? RESOLVE_TTL : MISS_TTL)) return hit.data;
-
-  const accept = (m, tolerance) => {
-    if (!m || !m.id || !String(m.id).startsWith("tt")) return false;
-    const y = yearOf(m);
-    if (y) return Math.abs(y - entry.year) <= tolerance;
-    return normalizeAr(m.name).includes(normalizeAr(entry.ar));
-  };
-
-  let found = null;
-
-  // 1) معرّف IMDb موثّق: نتحقق من السنة قبل الاعتماد عليه
-  if (entry.imdb) {
-    const cm = await safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/meta/series/${entry.imdb}.json`, {}, 3000);
-    if (cm?.meta && accept(cm.meta, 1)) found = cm.meta;
-  }
-
-  // 2) بحث TMDB العربي بالاسم العربي نفسه
-  if (!found) {
-    const sr = await safeFetchJson(
-      `${UPSTREAM_ADDONS.tmdbAddon}/catalog/series/tmdb.search/search=${encodeURIComponent(entry.ar)}.json`, {}, 3500
-    );
-    if (Array.isArray(sr?.metas)) found = sr.metas.find(m => accept(m, 2)) || null;
-  }
-
-  // 3) احتياط: بحث Cinemeta بالاسم اللاتيني مع تطابق كلمة على الأقل
-  if (!found && entry.en) {
-    const cr = await safeFetchJson(
-      `${UPSTREAM_ADDONS.cinemeta}/catalog/series/top/search=${encodeURIComponent(entry.en)}.json`, {}, 3500
-    );
-    const tokens = entry.en.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length > 2);
-    if (Array.isArray(cr?.metas)) {
-      found = cr.metas.find(m =>
-        accept(m, 1) && tokens.some(t => String(m.name || "").toLowerCase().includes(t))
-      ) || null;
-    }
-  }
-
-  let data = null;
-  if (found) {
-    let poster = found.poster;
-    let background = found.background;
-    let rating = found.imdbRating;
-    let genres = found.genres;
-    let desc = pickPlot(found);
-
-    // إذا ما فيه بوستر نكمل من Cinemeta
-    if (!poster) {
-      const cm = await safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/meta/series/${found.id}.json`, {}, 3000);
-      poster = cm?.meta?.poster;
-      background = background || cm?.meta?.background;
-      rating = rating || cm?.meta?.imdbRating;
-      genres = genres || cm?.meta?.genres;
-      desc = desc || pickPlot(cm?.meta);
-    }
-
-    // لا نعرض أي بطاقة بلا بوستر (هذا سبب المربعات الفارغة)
-    if (poster) {
-      const plot = isTextArabic(desc) ? desc : (entry.plot || desc || "");
-      data = {
-        id: found.id,
-        type: "series",
-        name: entry.ar,
-        poster,
-        background: background || poster,
-        genres: (genres && genres.length) ? localizeGenres(genres) : entry.genres,
-        imdbRating: rating,
-        releaseInfo: String(entry.year),
-        description: plot,
-        _en: entry.en || ""
-      };
-      CURATED_BY_ID.set(found.id, { name: entry.ar, plot: entry.plot || "" });
-    }
-  }
-
-  resolvedSeries.set(key, { data, time: Date.now() });
-  return data;
-}
-
 function parseSizeBytes(sizeStr) {
   if (!sizeStr) return 0;
   const match = sizeStr.match(/([0-9]+(?:\.[0-9]+)?)\s*(TB|GB|MB|KB|TIB|GIB|MIB|KIB)/i);
@@ -736,7 +591,7 @@ function renderConfigPage(host) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>المركز السيادي | Movies & Series</title>
+  <title>المركز السيادي - Movies & Series</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
   <style>
@@ -787,7 +642,7 @@ function renderConfigPage(host) {
 
     <div class="text-center space-y-3 border-b border-white/10 pb-7">
       <div class="inline-block px-4 py-1 rounded border border-[#d4af37]/40 bg-[#d4af37]/10 text-[#f3e5ab] text-xs font-bold tracking-wide">
-        الإصدار الرابع عشر // تعريب فوري + خانات فرز الدقات العلوية
+        الإصدار الخامس عشر - تعريب فوري + خانات فرز الدقات العلوية
       </div>
       <h1 class="text-3xl md:text-5xl font-black gold-gradient-text pt-2">
         Movies &amp; Series
@@ -882,10 +737,6 @@ async function buildArabicMeta(type, id) {
   // الاسم: العربي من TMDB إن وجد
   if (arMeta?.name && hasArabic(arMeta.name)) meta.name = stripAllEmojis(arMeta.name);
 
-  // المسلسلات المنتقاة: نحافظ على الاسم العربي المعتمد
-  const curated = CURATED_BY_ID.get(id);
-  if (curated?.name) meta.name = curated.name;
-
   // التصنيفات (الحقل والروابط)
   if (Array.isArray(meta.genres)) meta.genres = localizeGenres(meta.genres);
   if (Array.isArray(meta.genre)) meta.genre = localizeGenres(meta.genre);
@@ -897,7 +748,6 @@ async function buildArabicMeta(type, id) {
   let plot = pickPlot(meta);
   const arPlot = pickPlot(arMeta);
   if (isTextArabic(arPlot)) plot = arPlot;
-  else if (!isTextArabic(plot) && curated?.plot) plot = curated.plot;
 
   // الحلقات: نأخذ الأسماء والقصص العربية من TMDB ونترجم الباقي
   const arVideos = new Map();
@@ -996,7 +846,7 @@ export default async function handler(req, res) {
       if (resolutionFilter) {
         return res.status(200).json({
           id: `org.sovereign.arabic.res.${resolutionFilter.toLowerCase()}`,
-          version: "14.0.0",
+          version: "15.0.0",
           name: resolutionFilter,
           description: `سيرفرات دقة ${resolutionFilter} فقط`,
           resources: ["stream"],
@@ -1009,25 +859,17 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         id: "org.sovereign.arabic.movies.series",
-        version: "14.0.0",
+        version: "15.0.0",
         name: "Movies & Series",
-        description: "المركز السيادي للأفلام والمسلسلات | تعريب فوري للقصة والحلقات والتصنيفات مع المسلسلات العربية وتصنيف الدقات",
+        description: "المركز السيادي للأفلام والمسلسلات - تعريب فوري للقصة والحلقات والتصنيفات مع المسلسلات العربية وتصنيف الدقات",
         resources: ["stream", "subtitles", "catalog", "meta"],
         types: ["movie", "series"],
         idPrefixes: ["tt", "kitsu"],
         catalogs: [
-          { type: "movie", id: "top10_region_movies", name: `Movies // أفضل 10 في ${countryName}` },
-          { type: "series", id: "top10_region_series", name: `Series // أفضل 10 في ${countryName}` },
-          {
-            type: "series", id: "arabic_series_top", name: "Series // مسلسلات عربية",
-            extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
-          },
-          {
-            type: "series", id: "arabic_gulf_series", name: "Series // مسلسلات خليجية ورمضانية",
-            extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
-          },
-          { type: "movie", id: "trending_daily_movies", name: "Movies // ترند اليوم", extra: [{ name: "skip", isRequired: false }] },
-          { type: "series", id: "trending_daily_series", name: "Series // ترند اليوم", extra: [{ name: "skip", isRequired: false }] },
+          { type: "movie", id: "top10_region_movies", name: `Movies - أفضل 10 في ${countryName}` },
+          { type: "series", id: "top10_region_series", name: `Series - أفضل 10 في ${countryName}` },
+          { type: "movie", id: "trending_daily_movies", name: "Movies - ترند اليوم", extra: [{ name: "skip", isRequired: false }] },
+          { type: "series", id: "trending_daily_series", name: "Series - ترند اليوم", extra: [{ name: "skip", isRequired: false }] },
           {
             type: "movie", id: "sovereign_movies_main", name: "Movies",
             extra: [
@@ -1047,6 +889,14 @@ export default async function handler(req, res) {
         ],
         behaviorHints: { configurable: false, configurationRequired: false }
       });
+    }
+
+    if (path === "/health") {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      const providers = {};
+      for (const [h, st] of healthMetrics) providers[h] = { fails: st.fails, healthy: !(st.fails >= 3 && Date.now() - st.lastFail < 60000) };
+      return res.status(200).json({ status: "ok", version: "15.0.0", cacheEntries: memoryCache.size, providers });
     }
 
     if (path === "" || path === "/") {
@@ -1072,46 +922,30 @@ export default async function handler(req, res) {
       const cachedCat = getFromCache(cacheKey);
       if (cachedCat) return res.status(200).json(cachedCat);
 
-      // ---- المسلسلات العربية والخليجية: حلّ وقت التشغيل + بحث + skip ----
-      if (catalogId === "arabic_series_top" || catalogId === "arabic_gulf_series") {
-        const extra = parseExtra(extraPart);
-        const skip = parseInt(extra.skip || "0", 10) || 0;
-        const order = catalogId === "arabic_gulf_series"
-          ? [...ARABIC_SERIES_CURATED.gulf, ...ARABIC_SERIES_CURATED.general]
-          : [...ARABIC_SERIES_CURATED.general, ...ARABIC_SERIES_CURATED.gulf];
-
-        const resolvedAll = (await mapLimit(order, 8, resolveArabicSeries)).filter(Boolean);
-        const seen = new Set();
-        let list = resolvedAll.filter(m => (seen.has(m.id) ? false : (seen.add(m.id), true)));
-
-        if (extra.search) {
-          const q = normalizeAr(extra.search);
-          list = list.filter(m => normalizeAr(m.name).includes(q) || (m._en || "").toLowerCase().includes(q));
-        }
-
-        const page = list.slice(skip, skip + 40).map(m => ({ ...m }));
-        const { items, complete } = await localizeCatalogList(page, "series");
-        const payload = { metas: items.map(({ _en, ...m }) => m) };
-
-        if (payload.metas.length > 0 && complete) saveToCache(cacheKey, payload);
-        else res.setHeader("Cache-Control", "public, max-age=120");
-        return res.status(200).json(payload);
-      }
-
       // ---- بقية الكتالوجات ----
       const extraSuffix = extraPart ? `/${extraPart}.json` : ".json";
+      const extra = parseExtra(extraPart);
+      const isTrending = catalogId === "trending_daily_movies" || catalogId === "trending_daily_series";
+      const isTop10 = catalogId === "top10_region_movies" || catalogId === "top10_region_series";
+
       let tmdbUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.top${extraSuffix}`;
       let cinemetaUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${extraSuffix}`;
 
-      if (catalogId === "trending_daily_movies" || catalogId === "trending_daily_series") {
+      if (isTrending) {
         tmdbUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.trending${extraSuffix}`;
-      } else if (catalogId === "top10_region_movies" || catalogId === "top10_region_series") {
+      } else if (isTop10) {
         tmdbUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.trending.json`;
         cinemetaUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top.json`;
+      } else if (extra.search) {
+        // كان البحث يُرسل إلى tmdb.top فيرجع الأعلى تقييماً بدل نتائج البحث. الصحيح كتالوج البحث
+        tmdbUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.search${extraSuffix}`;
       }
 
+      // التصنيفات في الـ manifest بالإنجليزية بينما TMDB العربي يتوقعها بالعربية، فنعتمد Cinemeta وحده عند الفلترة بالتصنيف
+      const skipTmdb = Boolean(extra.genre) && !extra.search;
+
       const [tmdbData, cinemetaData] = await Promise.all([
-        safeFetchJson(tmdbUrl),
+        skipTmdb ? Promise.resolve(null) : safeFetchJson(tmdbUrl),
         safeFetchJson(cinemetaUrl)
       ]);
 
@@ -1152,19 +986,19 @@ export default async function handler(req, res) {
         }
       }
 
-      if (catalogId === "top10_region_movies" || catalogId === "top10_region_series") {
-        const regionHash = countryCode.charCodeAt(0) + (countryCode.charCodeAt(1) || 0) + daySeed;
-        const pool = cleanMetas.slice(0, 25);
-        pool.sort((a, b) => {
-          const scoreA = ((a.id.charCodeAt(a.id.length - 1) || 1) * regionHash) % 97;
-          const scoreB = ((b.id.charCodeAt(b.id.length - 1) || 1) * regionHash) % 97;
-          return scoreB - scoreA;
-        });
-        cleanMetas = pool.slice(0, 10).map((item, idx) => ({ ...item, name: `TOP ${idx + 1} - ${item.name}` }));
+      // الترتيب الحقيقي حسب الشعبية في TMDB (كان الترتيب سابقاً عشوائياً يتغير كل 12 ساعة)
+      if (isTop10) {
+        cleanMetas = cleanMetas.slice(0, 10).map((item, idx) => ({ ...item, name: `TOP ${idx + 1} - ${item.name}` }));
       }
 
       const { items: localizedBatch, complete } = await localizeCatalogList(cleanMetas.slice(0, 45), type);
       const finalMetas = [...localizedBatch, ...cleanMetas.slice(45)];
+
+      // إذا تعطلت كل المصادر نعرض آخر نسخة محفوظة بدل شاشة فارغة
+      if (finalMetas.length === 0) {
+        const stale = getFromCache(cacheKey, true);
+        if (stale) return res.status(200).json(stale);
+      }
 
       const payload = { metas: finalMetas };
       // لا نخزّن قائمة فيها قصة إنجليزية حتى لا تبقى 25 دقيقة (كان هذا سبب الخلط)
@@ -1234,6 +1068,7 @@ export default async function handler(req, res) {
     // -----------------------------------------------------------------
     if (path.includes("/stream/")) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=900");
       const streamSubPath = path.substring(path.indexOf("/stream/"));
       const cacheKey = `str_${resolutionFilter || "ALL"}_${streamSubPath}`;
       const cachedStreams = getFromCache(cacheKey);
@@ -1305,7 +1140,7 @@ export default async function handler(req, res) {
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     return res.status(200).json({
       status: "نشط",
-      name: "Movies & Series // المركز السيادي V14.0"
+      name: "Movies & Series - المركز السيادي V15.0"
     });
 
   } catch {
