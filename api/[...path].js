@@ -678,8 +678,9 @@ function renderConfigPage(host) {
   <h2>1. الإضافة الأساسية (الكتالوجات + التفاصيل + الترجمة)</h2>
   <a class="main" href="stremio://${host}/manifest.json">تثبيت الإضافة الأساسية</a>
 
-  <h2>2. تبويبات البث (ثبّت اللي تحتاجه)</h2>
-  <p>كل تبويب يظهر بجانب «الكل» في صفحة السيرفرات، ويعرض دقة الفيديو ولغة الصوت لكل رابط.</p>
+  <h2>2. البث (مطلوب: ثبّت واحداً على الأقل، وإلا يظهر «التشغيل غير متاح»)</h2>
+  <a class="main" href="stremio://${host}/all/manifest.json">تثبيت السيرفرات (كل الجودات في تبويب واحد)</a>
+  <p style="margin-top:14px">أو ثبّت تبويبات منفصلة تظهر بجانب «الكل» (اختياري):</p>
   <div class="grid">
     ${tile("/arabic", "عربي", "صوت عربي فقط", true)}
     ${tile("/4k", "4K", "أعلى جودة", true)}
@@ -880,14 +881,16 @@ export default async function handler(req, res) {
     // خانة بث محددة: دقة (/4k /1080p ...) أو لغة (/arabic)
     let resolutionFilter = null;
     let arabicOnly = false;
-    const resPrefixMatch = path.match(/^\/(8k|4k|2k|1080p|720p|480p|arabic)(\/.*)?$/i);
+    let allTab = false;
+    const resPrefixMatch = path.match(/^\/(8k|4k|2k|1080p|720p|480p|arabic|all)(\/.*)?$/i);
     if (resPrefixMatch) {
       const raw = resPrefixMatch[1].toLowerCase();
       if (raw === "arabic") arabicOnly = true;
+      else if (raw === "all") allTab = true;
       else resolutionFilter = raw === "1080p" || raw === "720p" || raw === "480p" ? raw : raw.toUpperCase();
       path = resPrefixMatch[2] || "/";
     }
-    const tabKey = arabicOnly ? "arabic" : (resolutionFilter || "all");
+    const tabKey = arabicOnly ? "arabic" : allTab ? "all" : (resolutionFilter || "all");
 
     // -----------------------------------------------------------------
     // Manifest
@@ -897,13 +900,13 @@ export default async function handler(req, res) {
       const { countryName } = getUserRegionInfo(req);
 
       // إضافات البث: اسم الإضافة نفسه هو التبويب الذي يظهر في صفحة السيرفرات
-      if (resolutionFilter || arabicOnly) {
-        const label = arabicOnly ? "عربي" : resolutionFilter;
+      if (resolutionFilter || arabicOnly || allTab) {
+        const label = arabicOnly ? "عربي" : allTab ? "السيرفرات" : resolutionFilter;
         return res.status(200).json({
           id: `org.sovereign.arabic.res.${tabKey.toLowerCase()}`,
           version: "16.0.0",
           name: label,
-          description: arabicOnly ? "روابط بصوت عربي فقط" : `روابط بدقة ${label} فقط`,
+          description: arabicOnly ? "روابط بصوت عربي فقط" : allTab ? "كل الروابط مرتبة: الأفضل أولاً مع لغة الصوت" : `روابط بدقة ${label} فقط`,
           resources: ["stream"],
           types: ["movie", "series"],
           idPrefixes: ["tt", "kitsu"],
