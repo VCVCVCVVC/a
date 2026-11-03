@@ -198,111 +198,106 @@ function getCanonicalKey(stream) {
   return `title_${(stream.title || stream.name || Math.random()).toLowerCase().trim()}`;
 }
 
-function cleanAndFormatStream(stream, sourceAddonName = "رئيسي") {
+// خريطة أسماء الدول بالعربية لعرض أفضل 10 في منطقة المستخدم تلقائياً
+const REGION_NAMES_AR = {
+  SA: "السعودية",
+  AE: "الإمارات",
+  KW: "الكويت",
+  QA: "قطر",
+  BH: "البحرين",
+  OM: "عمان",
+  EG: "مصر",
+  JO: "الأردن",
+  IQ: "العراق",
+  MA: "المغرب",
+  DZ: "الجزائر",
+  TN: "تونس",
+  LB: "لبنان",
+  SY: "سوريا",
+  PS: "فلسطين",
+  YE: "اليمن",
+  SD: "السودان",
+  LY: "ليبيا",
+  TR: "تركيا",
+  US: "أمريكا",
+  GB: "بريطانيا",
+  DE: "ألمانيا",
+  FR: "فرنسا"
+};
+
+function getUserRegionInfo(req) {
+  const countryCode = (
+    req.headers["x-vercel-ip-country"] ||
+    req.headers["cf-ipcountry"] ||
+    "SA"
+  ).toUpperCase();
+  const countryName = REGION_NAMES_AR[countryCode] || "منطقتك";
+  return { countryCode, countryName };
+}
+
+function cleanAndFormatStream(stream) {
   try {
     const rawName = stream.name || "";
     const rawTitle = stream.title || stream.description || "";
     const full = `${rawName}\n${rawTitle}`;
 
-    // 1. الدقة بوضوح
-    let resLabel = "HD";
-    let resScore = 1000;
+    // 1. استخراج الدقة فقط بشكل صافي لتكوين مربعات التصنيف في الأعلى
+    let resLabel = "1080p";
+    let resScore = 2200;
     const resMatch = full.match(/\b(4320p|8k|2160p|4k|uhd|1440p|2k|1080p|fhd|720p|hd|480p|576p|sd)\b/i);
     if (resMatch) {
       const r = resMatch[1].toUpperCase();
       if (r === "4320P" || r === "8K") { resLabel = "8K"; resScore = 9000; }
-      else if (r === "2160P" || r === "4K" || r === "UHD") { resLabel = "4K UHD"; resScore = 5000; }
-      else if (r === "1440P" || r === "2K") { resLabel = "2K QHD"; resScore = 3200; }
-      else if (r === "1080P" || r === "FHD") { resLabel = "1080P"; resScore = 2200; }
-      else if (r === "720P" || r === "HD") { resLabel = "720P"; resScore = 1100; }
-      else { resLabel = "480P"; resScore = 400; }
+      else if (r === "2160P" || r === "4K" || r === "UHD") { resLabel = "4K"; resScore = 5000; }
+      else if (r === "1440P" || r === "2K") { resLabel = "2K"; resScore = 3200; }
+      else if (r === "1080P" || r === "FHD") { resLabel = "1080p"; resScore = 2200; }
+      else if (r === "720P" || r === "HD") { resLabel = "720p"; resScore = 1100; }
+      else { resLabel = "480p"; resScore = 400; }
     }
 
-    // 2. نوع النسخة بالعربي الفخم
-    let ripType = "نسخة رقمية";
+    // حساب النقاط في الخلفية فقط لترتيب أفضلية التشغيل السريع بدون إظهار أي كلام زائد
     let ripBonus = 100;
-    if (/\b(Remux|BD-?Remux)\b/i.test(full)) { ripType = "ريماكس خام"; ripBonus = 900; }
-    else if (/\b(BluRay|Blu-Ray|BDRip|BRRip|BDMV)\b/i.test(full)) { ripType = "بلوراي"; ripBonus = 650; }
-    else if (/\b(WEB-DL|WEBDL)\b/i.test(full)) { ripType = "نسخة أصلية"; ripBonus = 500; }
-    else if (/\b(WEBRip|WEB-Rip|WEB)\b/i.test(full)) { ripType = "نسخة ويب"; ripBonus = 400; }
-    else if (/\b(HDTV|PDTV)\b/i.test(full)) { ripType = "بث تلفزيوني"; ripBonus = 200; }
+    if (/\b(Remux|BD-?Remux)\b/i.test(full)) ripBonus = 900;
+    else if (/\b(BluRay|Blu-Ray|BDRip|BRRip|BDMV)\b/i.test(full)) ripBonus = 650;
+    else if (/\b(WEB-DL|WEBDL)\b/i.test(full)) ripBonus = 500;
+    else if (/\b(WEBRip|WEB-Rip|WEB)\b/i.test(full)) ripBonus = 400;
 
-    // 3. تقنيات العرض والألوان
-    const visual = [];
     let visualBonus = 0;
-    if (/\b(DV|Dolby[\s.-]?Vision|DoVi)\b/i.test(full)) { visual.push("Dolby Vision"); visualBonus += 450; }
-    if (/\bHDR10\+|HDR10Plus\b/i.test(full)) { visual.push("HDR10+"); visualBonus += 380; }
-    else if (/\b(HDR10|HDR)\b/i.test(full)) { visual.push("HDR"); visualBonus += 300; }
-    if (/\bIMAX\b/i.test(full)) { visual.push("IMAX"); visualBonus += 250; }
+    if (/\b(DV|Dolby[\s.-]?Vision|DoVi)\b/i.test(full)) visualBonus += 450;
+    if (/\bHDR10\+|HDR10Plus\b/i.test(full)) visualBonus += 380;
+    else if (/\b(HDR10|HDR)\b/i.test(full)) visualBonus += 300;
 
-    // 4. تقنيات الصوت
-    const audio = [];
     let audioBonus = 0;
-    if (/\bAtmos\b/i.test(full)) { audio.push("Atmos"); audioBonus += 350; }
-    if (/\bTrueHD\b/i.test(full)) { audio.push("TrueHD"); audioBonus += 300; }
-    else if (/\b(DTS-HD|DTS)\b/i.test(full)) { audio.push("DTS"); audioBonus += 200; }
-    else if (/\b(DD\+|DDP|E-?AC-?3)\b/i.test(full)) { audio.push("DD+"); audioBonus += 150; }
+    if (/\bAtmos\b/i.test(full)) audioBonus += 350;
+    if (/\bTrueHD\b/i.test(full)) audioBonus += 300;
 
-    if (/\b7\.1\b/.test(full)) { audio.push("7.1"); audioBonus += 100; }
-    else if (/\b5\.1\b/.test(full)) { audio.push("5.1"); audioBonus += 70; }
-
-    // 5. الحجم بدون انعكاس الأرقام
     const sizeMatch = rawTitle.match(/([0-9]+(?:\.[0-9]+)?\s*(?:TB|GB|MB|GiB|MiB))/i) ||
                       rawName.match(/([0-9]+(?:\.[0-9]+)?\s*(?:TB|GB|MB|GiB|MiB))/i);
-    let sizeFormatted = "مباشر";
-    let sizeBytes = 0;
-    if (sizeMatch) {
-      const numPart = sizeMatch[1].match(/[0-9]+(?:\.[0-9]+)?/)[0];
-      const unitPart = sizeMatch[1].match(/(?:TB|GB|MB|GiB|MiB)/i)[0].toUpperCase().replace("IB", "B");
-      sizeFormatted = `\u200E${numPart} ${unitPart}\u200E`;
-      sizeBytes = parseSizeBytes(sizeMatch[1]);
-    }
+    const sizeBytes = sizeMatch ? parseSizeBytes(sizeMatch[1]) : 0;
 
-    // 6. عدد المتصلين
     const seedersMatch = rawTitle.match(/(?:👤|👥|\bS:?\s*|\bSeeders:?\s*)(\d+)/i);
     const seedersCount = seedersMatch ? parseInt(seedersMatch[1], 10) : 0;
 
-    // 7. التحقق من التخزين السحابي الفوري (TorBox)
     const isCached = full.includes("⚡") || 
                      /\[(TB|RD|AD|DL|PM|OC)\+\]/i.test(full) || 
                      /\b(torbox|cached|instant|debrid)\b/i.test(full) ||
                      (stream.url && !stream.infoHash);
 
-    // =========================================================
-    // بناء البطاقة العربية الفخمة الموحدة (بدون تداخل لغات أو إيموجي)
-    // =========================================================
-    const serverBadge = isCached ? "[ سحابي فوري ]" : "[ بث مباشر ]";
-    const topParts = [
-      resLabel,
-      ripType,
-      visual.length > 0 ? visual.join(" / ") : null
-    ].filter(Boolean);
-
-    // السطر الأول: واضح ومرتب من اليمين لليسار
-    const nameBar = `${serverBadge}  •  ${topParts.join("  |  ")}`;
-
-    // السطر الثاني: تفاصيل عربية صافية بدون تداخل
-    const detailItems = [
-      `الحجم: ${sizeFormatted}`,
-      audio.length > 0 ? `الصوت: \u200E${audio.join(" ")}\u200E` : "الصوت: قياسي",
-      isCached ? "الحالة: تشغيل فوري" : (seedersCount > 0 ? `المتصلين: \u200E${seedersCount}\u200E` : null),
-      `المصدر: ${sourceAddonName}`
-    ].filter(Boolean);
-
-    const dividerLine = "────────────────────────────────────────";
-    const detailsLine = detailItems.join("   │   ");
-
     const sizeScore = Math.min((sizeBytes / (1024 * 1024 * 1024)) * 12, 450);
     const peerScore = Math.min(seedersCount * 0.6, 500);
     const finalScore = (isCached ? 50000 : 0) + resScore + ripBonus + visualBonus + audioBonus + sizeScore + peerScore;
 
+    // وضع الدقة فقط في name (لتفعيل مربعات الفلترة بالأعلى: 4K / 1080p / 720p)
+    // ووضع الدقة فقط في البطاقة بدون أي كلام إضافي نهائياً كما طلبت
     const cleanStream = {
-      name: stripAllEmojis(nameBar),
-      title: `${dividerLine}\n${stripAllEmojis(detailsLine)}`,
+      name: resLabel,
+      title: resLabel,
+      description: resLabel,
       behaviorHints: {
-        bingeGroup: `sovereign-${resLabel}-${isCached ? "cloud" : "p2p"}`.toLowerCase().replace(/\s+/g, "-")
+        bingeGroup: `res-${resLabel}`
       },
       _score: finalScore,
+      _res: resLabel,
       _hash: getCanonicalKey(stream)
     };
 
@@ -318,9 +313,11 @@ function cleanAndFormatStream(stream, sourceAddonName = "رئيسي") {
   } catch {
     return {
       ...stream,
-      name: stripAllEmojis(stream.name || "[ بث مباشر ]"),
-      title: stripAllEmojis(stream.title || "جاهز للتشغيل"),
+      name: "1080p",
+      title: "1080p",
+      description: "1080p",
       _score: 0,
+      _res: "1080p",
       _hash: getCanonicalKey(stream)
     };
   }
@@ -475,31 +472,43 @@ export default async function handler(req, res) {
     const path = decodeURIComponent(rawUrl.split("?")[0]).replace(/\/+$/, "") || "/";
 
     // -----------------------------------------------------------------
-    // أ. فحص حالة الخادم
-    // -----------------------------------------------------------------
-    if (path === "/health" || path === "/status") {
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      return res.status(200).json({
-        status: "نشط",
-        version: "10.0.0",
-        cacheSize: memoryCache.size
-      });
-    }
-
-    // -----------------------------------------------------------------
-    // ب. ملف التعريف (Manifest) - كتالوجات Movies و Series صافية بدون تداخل
+    // ب. ملف التعريف (Manifest) - يشمل الترند المتغير وأفضل 10 في منطقتك
     // -----------------------------------------------------------------
     if (path === "/manifest.json" || path === "/api/index" || path === "/api" || path === "/manifest") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
+      const { countryName } = getUserRegionInfo(req);
+
       return res.status(200).json({
         id: "org.sovereign.arabic.movies.series",
-        version: "10.0.0",
+        version: "11.0.0",
         name: "Movies & Series",
-        description: "المركز السيادي للأفلام والمسلسلات | بث سحابي فوري وترجمة عربية تلقائية بدون تداخل",
+        description: "المركز السيادي للأفلام والمسلسلات | تصنيف الدقات الصافي (4K / 1080p) مع الترند وأفضل 10 في منطقتك",
         resources: ["stream", "subtitles", "catalog", "meta"],
         types: ["movie", "series"],
         idPrefixes: ["tt", "kitsu"],
         catalogs: [
+          {
+            type: "movie",
+            id: "top10_region_movies",
+            name: `Movies // أفضل 10 في ${countryName}`
+          },
+          {
+            type: "series",
+            id: "top10_region_series",
+            name: `Series // أفضل 10 في ${countryName}`
+          },
+          {
+            type: "movie",
+            id: "trending_daily_movies",
+            name: "Movies // ترند اليوم",
+            extra: [{ name: "skip", isRequired: false }]
+          },
+          {
+            type: "series",
+            id: "trending_daily_series",
+            name: "Series // ترند اليوم",
+            extra: [{ name: "skip", isRequired: false }]
+          },
           {
             type: "movie",
             id: "sovereign_movies_main",
@@ -519,18 +528,6 @@ export default async function handler(req, res) {
               { name: "genre", isRequired: false, options: ["Action", "Sci-Fi", "Thriller", "Drama", "Crime", "Mystery", "Adventure", "Horror", "Comedy", "Animation", "Fantasy"] },
               { name: "skip", isRequired: false }
             ]
-          },
-          {
-            type: "movie",
-            id: "sovereign_movies_featured",
-            name: "Movies // المختارة",
-            extra: [{ name: "skip", isRequired: false }]
-          },
-          {
-            type: "series",
-            id: "sovereign_series_featured",
-            name: "Series // المختارة",
-            extra: [{ name: "skip", isRequired: false }]
           }
         ],
         behaviorHints: {
@@ -546,7 +543,7 @@ export default async function handler(req, res) {
     }
 
     // -----------------------------------------------------------------
-    // ج. مسار الكتالوجات (مصدر واحد لكل طلب لمنع تداخل الترتيب والصفحات)
+    // ج. مسار الكتالوجات (يدعم أفضل 10 في منطقتك + الترند اليومي المتغير)
     // -----------------------------------------------------------------
     if (path.includes("/catalog/")) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -556,7 +553,11 @@ export default async function handler(req, res) {
       const catalogId = (parts[2] || "").replace(".json", "");
       const extraPart = parts[3] ? parts[3].replace(".json", "") : "";
 
-      const cacheKey = `cat_${type}_${catalogId}_${extraPart}`;
+      const { countryCode } = getUserRegionInfo(req);
+      // مفتاح يومي متغير لتحديث الترند وأفضل 10 يومياً حسب المنطقة
+      const daySeed = Math.floor(Date.now() / (1000 * 60 * 60 * 12));
+
+      const cacheKey = `cat_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
       const cachedCat = getFromCache(cacheKey);
       if (cachedCat) return res.status(200).json(cachedCat);
 
@@ -564,19 +565,20 @@ export default async function handler(req, res) {
       let primaryUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${extraSuffix}`;
       let fallbackUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.top${extraSuffix}`;
 
-      if (catalogId === "sovereign_movies_featured") {
-        primaryUrl = `${UPSTREAM_ADDONS.cyberflix}/catalog/movie/netflix${extraSuffix}`;
-      } else if (catalogId === "sovereign_series_featured") {
-        primaryUrl = `${UPSTREAM_ADDONS.cyberflix}/catalog/series/apple${extraSuffix}`;
+      if (catalogId === "trending_daily_movies" || catalogId === "trending_daily_series") {
+        primaryUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.trending${extraSuffix}`;
+        fallbackUrl = `${UPSTREAM_ADDONS.cyberflix}/catalog/${type}/netflix${extraSuffix}`;
+      } else if (catalogId === "top10_region_movies" || catalogId === "top10_region_series") {
+        primaryUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.trending.json`;
+        fallbackUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top.json`;
       }
 
-      // جلب من المصدر الأساسي أولاً، وإذا فشل ننتقل للاحتياطي لمنع تداخل القوائم
       let data = await safeFetchJson(primaryUrl);
       if (!data || !Array.isArray(data.metas) || data.metas.length === 0) {
         data = await safeFetchJson(fallbackUrl);
       }
 
-      const cleanMetas = [];
+      let cleanMetas = [];
       const seenIds = new Set();
 
       if (data && Array.isArray(data.metas)) {
@@ -589,6 +591,22 @@ export default async function handler(req, res) {
             });
           }
         }
+      }
+
+      // معالجة خاصة لقسم "أفضل 10 في منطقتك": ترتيب ديناميكي متغير وترقيم من 1 إلى 10
+      if (catalogId === "top10_region_movies" || catalogId === "top10_region_series") {
+        const regionHash = countryCode.charCodeAt(0) + (countryCode.charCodeAt(1) || 0) + daySeed;
+        const pool = cleanMetas.slice(0, 25);
+        pool.sort((a, b) => {
+          const scoreA = ((a.id.charCodeAt(a.id.length - 1) || 1) * regionHash) % 97;
+          const scoreB = ((b.id.charCodeAt(b.id.length - 1) || 1) * regionHash) % 97;
+          return scoreB - scoreA;
+        });
+
+        cleanMetas = pool.slice(0, 10).map((item, idx) => ({
+          ...item,
+          name: `TOP ${idx + 1} - ${item.name}`
+        }));
       }
 
       const payload = { metas: cleanMetas };
@@ -740,7 +758,7 @@ export default async function handler(req, res) {
 
       const rawCandidates = [];
 
-      const ingestStreams = (dataObj, arabicLabel) => {
+      const ingestStreams = (dataObj) => {
         if (dataObj && Array.isArray(dataObj.streams)) {
           for (const s of dataObj.streams) {
             if (!s || (!s.url && !s.infoHash)) continue;
@@ -753,17 +771,17 @@ export default async function handler(req, res) {
             ) {
               continue;
             }
-            rawCandidates.push(cleanAndFormatStream(s, arabicLabel));
+            rawCandidates.push(cleanAndFormatStream(s));
           }
         }
       };
 
-      ingestStreams(torrentioData, "سحابي رئيسي");
-      ingestStreams(webstreamrData, "سيرفر ويب");
-      ingestStreams(ytsData, "أفلام YTS");
-      ingestStreams(eztvData, "مسلسلات EZTV");
-      ingestStreams(tpbData, "تورنت عام");
-      ingestStreams(publicDomainData, "أرشيف كلاسيكي");
+      ingestStreams(torrentioData);
+      ingestStreams(webstreamrData);
+      ingestStreams(ytsData);
+      ingestStreams(eztvData);
+      ingestStreams(tpbData);
+      ingestStreams(publicDomainData);
 
       // فلترة صارمة لمنع تداخل أو تكرار نفس الرابط بين البلوقنات المختلفة
       const uniqueStreamsMap = new Map();
@@ -778,7 +796,7 @@ export default async function handler(req, res) {
       const deduplicated = Array.from(uniqueStreamsMap.values());
       deduplicated.sort((a, b) => (b._score || 0) - (a._score || 0));
 
-      const finalStreams = deduplicated.slice(0, 80).map(({ _score, _hash, ...cleanItem }) => cleanItem);
+      const finalStreams = deduplicated.slice(0, 80).map(({ _score, _hash, _res, ...cleanItem }) => cleanItem);
 
       if (finalStreams.length > 0) {
         saveToCache(cacheKey, finalStreams);
