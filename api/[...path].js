@@ -1,49 +1,37 @@
 // =========================================================================
-// 1. الإعدادات الفائقة وشبكة الملحقات العالمية الموسعة (22+ Upstream Addons)
+// 1. الإعدادات الأساسية والبلوقنات المستقرة بدون تداخل (Conflict-Free Addons)
 // =========================================================================
 
 const UPSTREAM_URL = process.env.UPSTREAM_URL || "https://torrentio.strem.fun/qualityfilter=scr,cam|torbox=3183a8fd-2d85-41fb-a58d-39c5737efae3";
 const OPENSUBTITLES_API_KEY = process.env.OPENSUBTITLES_API_KEY || "";
-const CACHE_TTL = 20 * 60 * 1000;
-const STALE_TTL = 60 * 60 * 1000;
-const TIMEOUT_MS = 5500;
+const CACHE_TTL = 25 * 60 * 1000;
+const STALE_TTL = 90 * 60 * 1000;
+const TIMEOUT_MS = 4500;
 
-// ترسانة الإضافات العالمية المدمجة (بدون الحاجة لأي تهيئة خارجية)
+// قائمة البلوقنات المصفاة والموثوقة (تم إزالة البلوقنات المتعارضة أو التي تتطلب مفاتيح خارجية)
 const UPSTREAM_ADDONS = {
-  // مصادر البيانات والكتالوجات (Catalogs & Metadata)
+  // مصادر الكتالوجات والبيانات (موحدة لمنع تكرار أو تضارب البوسترات)
   cinemeta: "https://v3-cinemeta.strem.io",
   tmdbAddon: "https://tmdb.strem.fun",
   cyberflix: "https://cyberflix.kamyroll.tech",
-  streamingCatalogs: "https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club",
-  traktUpNext: "https://trakt.strem.fun",
   animeKitsu: "https://anime-kitsu.strem.fun",
-  letterboxd: "https://letterboxd.strem.fun",
-  imdbCatalogs: "https://imdb-catalogs.strem.fun",
 
-  // مصادر البث والتورنت والروابط المباشرة (Multi-Scrapers & Streams)
-  knightcrawler: "https://knightcrawler.elfhosted.com",
-  comet: "https://comet.elfhosted.com",
-  mediafusion: "https://mediafusion.elfhosted.com",
-  annatar: "https://annatar.elfhosted.com",
+  // مصادر البث المباشر والتورنت (مفصولة ومفلترة بدقة)
   tpbPlus: "https://thepiratebay-plus.strem.fun",
   yts: "https://yts.strem.fun",
   eztv: "https://eztv.strem.fun",
-  nyaa: "https://nyaa.strem.fun",
-  watchhub: "https://watchhub.strem.io",
-  publicDomain: "https://caching.stremio.net/publicdomainmovies.now.sh",
   webstreamr: "https://webstreamr.hayd.uk",
+  publicDomain: "https://caching.stremio.net/publicdomainmovies.now.sh",
 
-  // مصادر الترجمات العربية والعالمية (Subtitles Engines)
-  opensubtitlesV3: "https://opensubtitles-v3.strem.io",
+  // مصادر الترجمة العربية المعتمدة
   subdl: "https://subdl.strem.fun",
+  opensubtitlesV3: "https://opensubtitles-v3.strem.io",
   subscene: "https://subscene.strem.fun",
-  addic7ed: "https://addic7ed.strem.fun",
-  podnapisi: "https://podnapisi.strem.fun",
   yifysubs: "https://yifysubtitles.strem.fun"
 };
 
 // =========================================================================
-// 2. نظام الذاكرة المؤقتة المتقدم، منع التكرار، وقاطع الدائرة (Resilience Layer)
+// 2. إدارة الذاكرة المؤقتة ومنع التداخل في الطلبات (Request Isolation)
 // =========================================================================
 
 const memoryCache = new Map();
@@ -59,20 +47,20 @@ function getFromCache(key, allowStale = false) {
     if (allowStale && age < STALE_TTL) return item.data;
     memoryCache.delete(key);
   } catch {
-    // صامت
+    // تجاهل آمن
   }
   return null;
 }
 
 function saveToCache(key, data) {
   try {
-    if (memoryCache.size > 3500) {
-      const oldestKeys = Array.from(memoryCache.keys()).slice(0, 900);
+    if (memoryCache.size > 3000) {
+      const oldestKeys = Array.from(memoryCache.keys()).slice(0, 800);
       oldestKeys.forEach(k => memoryCache.delete(k));
     }
     memoryCache.set(key, { data, time: Date.now() });
   } catch {
-    // صامت
+    // تجاهل آمن
   }
 }
 
@@ -87,7 +75,7 @@ function recordProviderStatus(host, success) {
     }
     healthMetrics.set(host, stat);
   } catch {
-    // صامت
+    // تجاهل آمن
   }
 }
 
@@ -96,8 +84,8 @@ function isProviderHealthy(url) {
     const host = new URL(url).hostname;
     const stat = healthMetrics.get(host);
     if (!stat) return true;
-    if (stat.fails >= 4 && Date.now() - stat.lastFail < 60000) {
-      return false; // عزل المزود المتعطل مؤقتاً لمدة دقيقة لضمان سرعة الاستجابة
+    if (stat.fails >= 3 && Date.now() - stat.lastFail < 60000) {
+      return false;
     }
     return true;
   } catch {
@@ -108,7 +96,6 @@ function isProviderHealthy(url) {
 async function safeFetchJson(url, headers = {}, customTimeout = TIMEOUT_MS) {
   if (!isProviderHealthy(url)) return null;
 
-  // دمج الطلبات المتطابقة في نفس اللحظة (In-Flight Request Coalescing)
   if (inflightRequests.has(url)) {
     return inflightRequests.get(url);
   }
@@ -123,10 +110,9 @@ async function safeFetchJson(url, headers = {}, customTimeout = TIMEOUT_MS) {
       const res = await fetch(url, {
         signal: controller.signal,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SovereignStremioEngine/9.0.0",
-          "Accept": "application/json, text/plain, */*",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ArabicSovereignHub/10.0.0",
+          "Accept": "application/json",
           "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-          "Connection": "keep-alive",
           ...headers
         }
       });
@@ -136,7 +122,15 @@ async function safeFetchJson(url, headers = {}, customTimeout = TIMEOUT_MS) {
         recordProviderStatus(host, false);
         return null;
       }
-      const data = await res.json();
+
+      const text = await res.text();
+      if (!text || text.trim().startsWith("<")) {
+        // منع التداخل الناتج عن صفحات الخطأ HTML التي ترجعها بعض البلوقنات
+        recordProviderStatus(host, false);
+        return null;
+      }
+
+      const data = JSON.parse(text);
       recordProviderStatus(host, true);
       return data;
     } catch {
@@ -152,7 +146,7 @@ async function safeFetchJson(url, headers = {}, customTimeout = TIMEOUT_MS) {
 }
 
 // =========================================================================
-// 3. فلتر إزالة الإيموجيات الصارم ومحرك التنسيق الهندسي الفخم (Zero-Emoji Engine)
+// 3. فلتر التطهير من الإيموجيات والتنسيق العربي الفخم بدون تداخل اللغات
 // =========================================================================
 
 function stripAllEmojis(str) {
@@ -183,98 +177,79 @@ function extractTrackers(stream) {
     "udp://open.demonii.com:1337/announce",
     "udp://open.stealth.si:80/announce",
     "udp://exodus.desync.com:6969/announce",
-    "udp://tracker.torrent.eu.org:451/announce",
-    "http://tracker.openbittorrent.com:80/announce"
+    "udp://tracker.torrent.eu.org:451/announce"
   ];
   const existing = Array.isArray(stream.sources) ? stream.sources : [];
   const combined = new Set([...existing, ...defaultTrackers.map(t => `tracker:${t}`)]);
   return Array.from(combined);
 }
 
-function cleanAndFormatStream(stream, sourceAddonName = "CORE") {
+// استخراج البصمة الموحدة للروابط لمنع تداخل وتكرار نفس السيرفر من أكثر من بلوقن
+function getCanonicalKey(stream) {
+  if (stream.infoHash) {
+    const fileIdx = typeof stream.fileIdx === "number" ? `_${stream.fileIdx}` : "";
+    return `hash_${stream.infoHash.toLowerCase().trim()}${fileIdx}`;
+  }
+  if (stream.url) {
+    const hashInUrl = stream.url.match(/\b([a-fA-F0-9]{40})\b/);
+    if (hashInUrl) return `hash_${hashInUrl[1].toLowerCase()}`;
+    return `url_${stream.url.split("?")[0].toLowerCase().trim()}`;
+  }
+  return `title_${(stream.title || stream.name || Math.random()).toLowerCase().trim()}`;
+}
+
+function cleanAndFormatStream(stream, sourceAddonName = "رئيسي") {
   try {
     const rawName = stream.name || "";
     const rawTitle = stream.title || stream.description || "";
     const full = `${rawName}\n${rawTitle}`;
 
-    // 1. استخراج الدقة (Resolution)
+    // 1. الدقة بوضوح
     let resLabel = "HD";
     let resScore = 1000;
     const resMatch = full.match(/\b(4320p|8k|2160p|4k|uhd|1440p|2k|1080p|fhd|720p|hd|480p|576p|sd)\b/i);
     if (resMatch) {
       const r = resMatch[1].toUpperCase();
-      if (r === "4320P" || r === "8K") { resLabel = "8K MASTER"; resScore = 9000; }
+      if (r === "4320P" || r === "8K") { resLabel = "8K"; resScore = 9000; }
       else if (r === "2160P" || r === "4K" || r === "UHD") { resLabel = "4K UHD"; resScore = 5000; }
       else if (r === "1440P" || r === "2K") { resLabel = "2K QHD"; resScore = 3200; }
-      else if (r === "1080P" || r === "FHD") { resLabel = "1080P FHD"; resScore = 2200; }
-      else if (r === "720P" || r === "HD") { resLabel = "720P HD"; resScore = 1100; }
-      else { resLabel = "480P SD"; resScore = 400; }
+      else if (r === "1080P" || r === "FHD") { resLabel = "1080P"; resScore = 2200; }
+      else if (r === "720P" || r === "HD") { resLabel = "720P"; resScore = 1100; }
+      else { resLabel = "480P"; resScore = 400; }
     }
 
-    // 2. استخراج نوع المصدر والنسخة (Source & Edition)
-    let ripType = "STREAM";
+    // 2. نوع النسخة بالعربي الفخم
+    let ripType = "نسخة رقمية";
     let ripBonus = 100;
-    if (/\b(Remux|BD-?Remux)\b/i.test(full)) { ripType = "REMUX"; ripBonus = 900; }
-    else if (/\b(BluRay|Blu-Ray|BDRip|BRRip|BDMV)\b/i.test(full)) { ripType = "BLURAY"; ripBonus = 650; }
-    else if (/\b(WEB-DL|WEBDL)\b/i.test(full)) { ripType = "WEB-DL"; ripBonus = 500; }
-    else if (/\b(WEBRip|WEB-Rip|WEB)\b/i.test(full)) { ripType = "WEBRIP"; ripBonus = 400; }
-    else if (/\b(HDTV|PDTV)\b/i.test(full)) { ripType = "HDTV"; ripBonus = 200; }
-    else if (/\b(DVDRip|DVD)\b/i.test(full)) { ripType = "DVDRIP"; ripBonus = 120; }
+    if (/\b(Remux|BD-?Remux)\b/i.test(full)) { ripType = "ريماكس خام"; ripBonus = 900; }
+    else if (/\b(BluRay|Blu-Ray|BDRip|BRRip|BDMV)\b/i.test(full)) { ripType = "بلوراي"; ripBonus = 650; }
+    else if (/\b(WEB-DL|WEBDL)\b/i.test(full)) { ripType = "نسخة أصلية"; ripBonus = 500; }
+    else if (/\b(WEBRip|WEB-Rip|WEB)\b/i.test(full)) { ripType = "نسخة ويب"; ripBonus = 400; }
+    else if (/\b(HDTV|PDTV)\b/i.test(full)) { ripType = "بث تلفزيوني"; ripBonus = 200; }
 
-    // 3. استخراج المنصة الأصلية إن وجدت (Network Tag)
-    let networkTag = "";
-    if (/\b(AMZN|Amazon)\b/i.test(full)) networkTag = "AMZN";
-    else if (/\b(NF|Netflix)\b/i.test(full)) networkTag = "NF";
-    else if (/\b(ATVP|AppleTV)\b/i.test(full)) networkTag = "ATVP";
-    else if (/\b(DSNP|Disney)\b/i.test(full)) networkTag = "DSNP";
-    else if (/\b(HMAX|MAX|HBO)\b/i.test(full)) networkTag = "MAX";
-    else if (/\b(HULU)\b/i.test(full)) networkTag = "HULU";
-    else if (/\b(PCOK|Peacock)\b/i.test(full)) networkTag = "PCOK";
-
-    // 4. استخراج تقنيات العرض والألوان (Dynamic Range & Visual Specs)
+    // 3. تقنيات العرض والألوان
     const visual = [];
     let visualBonus = 0;
-    if (/\b(DV|Dolby[\s.-]?Vision|DoVi)\b/i.test(full)) { visual.push("DOLBY VISION"); visualBonus += 450; }
+    if (/\b(DV|Dolby[\s.-]?Vision|DoVi)\b/i.test(full)) { visual.push("Dolby Vision"); visualBonus += 450; }
     if (/\bHDR10\+|HDR10Plus\b/i.test(full)) { visual.push("HDR10+"); visualBonus += 380; }
-    else if (/\b(HDR10|HDR)\b/i.test(full)) { visual.push("HDR10"); visualBonus += 300; }
-    else if (/\bHLG\b/i.test(full)) { visual.push("HLG"); visualBonus += 200; }
+    else if (/\b(HDR10|HDR)\b/i.test(full)) { visual.push("HDR"); visualBonus += 300; }
     if (/\bIMAX\b/i.test(full)) { visual.push("IMAX"); visualBonus += 250; }
-    if (/\b(10bit|10-bit|Hi10P)\b/i.test(full)) { visual.push("10-BIT"); visualBonus += 120; }
 
-    // 5. استخراج ترميز الفيديو (Video Codec)
-    let codec = "AVC";
-    let codecBonus = 50;
-    if (/\b(AV1)\b/i.test(full)) { codec = "AV1"; codecBonus = 220; }
-    else if (/\b(HEVC|x265|H\.?265)\b/i.test(full)) { codec = "HEVC"; codecBonus = 200; }
-    else if (/\b(AVC|x264|H\.?264)\b/i.test(full)) { codec = "H.264"; codecBonus = 100; }
-
-    // 6. استخراج الهندسة الصوتية (Audio Architecture)
+    // 4. تقنيات الصوت
     const audio = [];
     let audioBonus = 0;
-    if (/\bAtmos\b/i.test(full)) { audio.push("ATMOS"); audioBonus += 350; }
-    if (/\bTrueHD\b/i.test(full)) { audio.push("TRUEHD"); audioBonus += 300; }
-    else if (/\b(DTS-HD[\s.-]?MA|DTS-X|DTS:X)\b/i.test(full)) { audio.push("DTS-HD MA"); audioBonus += 280; }
-    else if (/\b(DTS-HD|DTS)\b/i.test(full)) { audio.push("DTS"); audioBonus += 180; }
-    else if (/\b(DD\+|DDP|E-?AC-?3)\b/i.test(full)) { audio.push("DDP"); audioBonus += 150; }
-    else if (/\b(AC-?3|DD)\b/i.test(full)) { audio.push("AC3"); audioBonus += 90; }
-    else if (/\b(FLAC)\b/i.test(full)) { audio.push("FLAC"); audioBonus += 160; }
-    else if (/\b(AAC|OPUS)\b/i.test(full)) { audio.push("AAC"); audioBonus += 50; }
+    if (/\bAtmos\b/i.test(full)) { audio.push("Atmos"); audioBonus += 350; }
+    if (/\bTrueHD\b/i.test(full)) { audio.push("TrueHD"); audioBonus += 300; }
+    else if (/\b(DTS-HD|DTS)\b/i.test(full)) { audio.push("DTS"); audioBonus += 200; }
+    else if (/\b(DD\+|DDP|E-?AC-?3)\b/i.test(full)) { audio.push("DD+"); audioBonus += 150; }
 
-    if (/\b7\.1\b/.test(full)) { audio.push("7.1CH"); audioBonus += 100; }
-    else if (/\b5\.1\b/.test(full)) { audio.push("5.1CH"); audioBonus += 70; }
-    else if (/\b2\.0\b/.test(full)) { audio.push("2.0CH"); }
+    if (/\b7\.1\b/.test(full)) { audio.push("7.1"); audioBonus += 100; }
+    else if (/\b5\.1\b/.test(full)) { audio.push("5.1"); audioBonus += 70; }
 
-    // 7. اللغات المتوفرة في الملف (Multi / Dual Audio / Arabic)
-    const langs = [];
-    if (/\b(ARA|ARABIC|عربي|مدبلج|مترجم)\b/i.test(full)) langs.push("AR");
-    if (/\b(MULTI|MULTi)\b/i.test(full)) langs.push("MULTI");
-    else if (/\b(DUAL)\b/i.test(full)) langs.push("DUAL");
-    if (/\b(ENG|ENGLISH)\b/i.test(full)) langs.push("EN");
-
-    // 8. استخراج الحجم الفعلي مع عزل LTR صارم لمنع انعكاس الأرقام
+    // 5. الحجم بدون انعكاس الأرقام
     const sizeMatch = rawTitle.match(/([0-9]+(?:\.[0-9]+)?\s*(?:TB|GB|MB|GiB|MiB))/i) ||
                       rawName.match(/([0-9]+(?:\.[0-9]+)?\s*(?:TB|GB|MB|GiB|MiB))/i);
-    let sizeFormatted = null;
+    let sizeFormatted = "مباشر";
     let sizeBytes = 0;
     if (sizeMatch) {
       const numPart = sizeMatch[1].match(/[0-9]+(?:\.[0-9]+)?/)[0];
@@ -283,85 +258,76 @@ function cleanAndFormatStream(stream, sourceAddonName = "CORE") {
       sizeBytes = parseSizeBytes(sizeMatch[1]);
     }
 
-    // 9. استخراج عدد الـ Seeders بدون إيموجي نهائياً
+    // 6. عدد المتصلين
     const seedersMatch = rawTitle.match(/(?:👤|👥|\bS:?\s*|\bSeeders:?\s*)(\d+)/i);
     const seedersCount = seedersMatch ? parseInt(seedersMatch[1], 10) : 0;
 
-    // 10. فحص حالة التخزين السحابي الفوري (Instant Cloud Debrid)
+    // 7. التحقق من التخزين السحابي الفوري (TorBox)
     const isCached = full.includes("⚡") || 
                      /\[(TB|RD|AD|DL|PM|OC)\+\]/i.test(full) || 
                      /\b(torbox|cached|instant|debrid)\b/i.test(full) ||
                      (stream.url && !stream.infoHash);
 
-    // 11. استخراج فريق الإصدار (Release Group)
-    let releaseGroup = sourceAddonName;
-    const groupMatch = full.match(/-([a-zA-Z0-9]+)(?:\[.*?\])?(?:\.mkv|\.mp4|\.avi)?$/m) ||
-                       rawTitle.match(/\b(FLUX|NTb|CMRG|QxR|PSA|RARBG|YTS|TGx|ETHEL|SPARKS|FGT|EVO|ION10|Framestor|EPSiLON)\b/i);
-    if (groupMatch) {
-      releaseGroup = stripAllEmojis(groupMatch[1] || groupMatch[0]).toUpperCase();
-    }
-
     // =========================================================
-    // تصميم البطاقة الفخم الخالي من الإيموجيات (Zero-Emoji Luxury UI)
+    // بناء البطاقة العربية الفخمة الموحدة (بدون تداخل لغات أو إيموجي)
     // =========================================================
-    const engineTag = isCached ? "[ TORBOX CLOUD ]" : "[ DIRECT P2P ]";
-    const sourceBadge = networkTag ? `${ripType} ${networkTag}` : ripType;
-    const headerSpecs = [
+    const serverBadge = isCached ? "[ سحابي فوري ]" : "[ بث مباشر ]";
+    const topParts = [
       resLabel,
-      sourceBadge,
-      visual.length > 0 ? visual.join(" / ") : null,
-      codec
+      ripType,
+      visual.length > 0 ? visual.join(" / ") : null
     ].filter(Boolean);
 
-    // السطر الأول (العنوان الرئيسي للبطاقة)
-    const nameBar = `\u200E${engineTag}  ::  ${headerSpecs.join("  •  ")}\u200E`;
+    // السطر الأول: واضح ومرتب من اليمين لليسار
+    const nameBar = `${serverBadge}  •  ${topParts.join("  |  ")}`;
 
-    // السطر الثاني (البيانات الهندسية المفصلة)
-    const techPills = [
-      sizeFormatted ? `SIZE: ${sizeFormatted}` : "SIZE: STREAM",
-      audio.length > 0 ? `AUDIO: \u200E${audio.join(" ")}\u200E` : "AUDIO: STEREO",
-      seedersCount > 0 ? `PEERS: \u200E${seedersCount}\u200E` : (isCached ? "STATUS: INSTANT" : null),
-      langs.length > 0 ? `LANG: \u200E${langs.join("/")}\u200E` : null,
-      releaseGroup ? `SRC: \u200E${releaseGroup}\u200E` : null
+    // السطر الثاني: تفاصيل عربية صافية بدون تداخل
+    const detailItems = [
+      `الحجم: ${sizeFormatted}`,
+      audio.length > 0 ? `الصوت: \u200E${audio.join(" ")}\u200E` : "الصوت: قياسي",
+      isCached ? "الحالة: تشغيل فوري" : (seedersCount > 0 ? `المتصلين: \u200E${seedersCount}\u200E` : null),
+      `المصدر: ${sourceAddonName}`
     ].filter(Boolean);
 
-    const dividerLine = "──────────────────────────────────────────────────";
-    const detailsLine = `\u200E${techPills.join("   |   ")}\u200E`;
+    const dividerLine = "────────────────────────────────────────";
+    const detailsLine = detailItems.join("   │   ");
 
-    // حساب نقاط الجودة الذكية (AI Quality Scoring Matrix)
     const sizeScore = Math.min((sizeBytes / (1024 * 1024 * 1024)) * 12, 450);
     const peerScore = Math.min(seedersCount * 0.6, 500);
-    const finalScore = (isCached ? 50000 : 0) + resScore + ripBonus + visualBonus + codecBonus + audioBonus + sizeScore + peerScore;
+    const finalScore = (isCached ? 50000 : 0) + resScore + ripBonus + visualBonus + audioBonus + sizeScore + peerScore;
 
     const cleanStream = {
-      ...stream,
       name: stripAllEmojis(nameBar),
       title: `${dividerLine}\n${stripAllEmojis(detailsLine)}`,
       behaviorHints: {
-        ...(stream.behaviorHints || {}),
-        bingeGroup: `sovereign-${resLabel}-${ripType}-${releaseGroup}`.toLowerCase().replace(/\s+/g, "-")
+        bingeGroup: `sovereign-${resLabel}-${isCached ? "cloud" : "p2p"}`.toLowerCase().replace(/\s+/g, "-")
       },
       _score: finalScore,
-      _hash: (stream.infoHash || stream.url || rawTitle).toLowerCase()
+      _hash: getCanonicalKey(stream)
     };
 
+    if (stream.url) cleanStream.url = stream.url;
     if (stream.infoHash) {
+      cleanStream.infoHash = stream.infoHash.toLowerCase();
+      if (typeof stream.fileIdx === "number") cleanStream.fileIdx = stream.fileIdx;
       cleanStream.sources = extractTrackers(stream);
     }
+    if (stream.subtitles) cleanStream.subtitles = stream.subtitles;
 
     return cleanStream;
   } catch {
     return {
       ...stream,
-      name: stripAllEmojis(stream.name || "STREAM SOURCE"),
-      title: stripAllEmojis(stream.title || "DIRECT PLAYBACK"),
-      _score: 0
+      name: stripAllEmojis(stream.name || "[ بث مباشر ]"),
+      title: stripAllEmojis(stream.title || "جاهز للتشغيل"),
+      _score: 0,
+      _hash: getCanonicalKey(stream)
     };
   }
 }
 
 // =========================================================================
-// 4. واجهة الويب الملكية (Sovereign Luxury UI - Zero Emojis)
+// 4. واجهة التثبيت العربية الفخمة الصافية (بدون إيموجي وبدون تداخل لغات)
 // =========================================================================
 
 function renderConfigPage(host) {
@@ -370,133 +336,119 @@ function renderConfigPage(host) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SOVEREIGN MEDIA HUB // MOVIES & SERIES</title>
+  <title>المركز السيادي | Movies & Series</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Cinzel:wght@600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
   <style>
     :root {
       --gold: #d4af37;
       --gold-light: #f3e5ab;
-      --obsidian: #050507;
-      --panel: rgba(14, 15, 20, 0.88);
+      --obsidian: #060609;
+      --panel: rgba(15, 16, 22, 0.92);
     }
     body {
       font-family: 'Cairo', sans-serif;
       background-color: var(--obsidian);
       background-image: 
-        radial-gradient(circle at 15% 15%, rgba(212, 175, 55, 0.08) 0%, transparent 45%),
-        radial-gradient(circle at 85% 85%, rgba(212, 175, 55, 0.05) 0%, transparent 45%),
-        linear-gradient(180deg, #050507 0%, #0a0b10 100%);
+        radial-gradient(circle at 20% 20%, rgba(212, 175, 55, 0.08) 0%, transparent 45%),
+        radial-gradient(circle at 80% 80%, rgba(212, 175, 55, 0.05) 0%, transparent 45%);
       color: #e5e7eb;
     }
-    .font-luxury { font-family: 'Cinzel', serif; }
-    .font-mono-tech { font-family: 'JetBrains Mono', monospace; }
     .sovereign-card {
       background: var(--panel);
-      backdrop-filter: blur(24px);
-      border: 1px solid rgba(212, 175, 55, 0.22);
-      box-shadow: 0 25px 70px -15px rgba(0, 0, 0, 0.85), 0 0 35px -10px rgba(212, 175, 55, 0.15);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(212, 175, 55, 0.25);
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.9);
     }
     .gold-gradient-text {
-      background: linear-gradient(135deg, #fff6d6 0%, #d4af37 50%, #997a15 100%);
+      background: linear-gradient(135deg, #fff6d6 0%, #d4af37 55%, #997a15 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
     .gold-btn {
       background: linear-gradient(135deg, #d4af37 0%, #aa820a 100%);
       color: #050507;
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all 0.25s ease;
     }
     .gold-btn:hover {
-      filter: brightness(1.12);
+      filter: brightness(1.1);
       transform: translateY(-2px);
-      box-shadow: 0 12px 30px -8px rgba(212, 175, 55, 0.55);
+      box-shadow: 0 10px 25px -5px rgba(212, 175, 55, 0.5);
     }
-    .spec-pill {
-      border: 1px solid rgba(255, 255, 255, 0.07);
+    .spec-box {
+      border: 1px solid rgba(255, 255, 255, 0.08);
       background: rgba(255, 255, 255, 0.02);
     }
   </style>
 </head>
 <body class="min-h-screen flex items-center justify-center p-4 md:p-8">
-  <div class="sovereign-card max-w-2xl w-full rounded-none md:rounded-2xl p-8 md:p-12 relative overflow-hidden">
-    <!-- Top Architectural Accent Line -->
+  <div class="sovereign-card max-w-2xl w-full rounded-2xl p-8 md:p-10 relative overflow-hidden">
     <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#d4af37] to-transparent"></div>
 
-    <!-- Header Section -->
-    <div class="text-center space-y-3 border-b border-white/10 pb-8">
-      <div class="inline-block px-4 py-1 border border-[#d4af37]/40 bg-[#d4af37]/10 text-[#f3e5ab] text-xs font-mono-tech tracking-widest uppercase">
-        SOVEREIGN EDITION // V9.0 ARCHITECTURE
+    <div class="text-center space-y-3 border-b border-white/10 pb-7">
+      <div class="inline-block px-4 py-1 rounded border border-[#d4af37]/40 bg-[#d4af37]/10 text-[#f3e5ab] text-xs font-bold tracking-wide">
+        الإصدار العاشر // معمارية عربية صافية بدون تداخل
       </div>
-      <h1 class="text-3xl md:text-5xl font-black font-luxury tracking-wider gold-gradient-text uppercase pt-2">
-        MOVIES &amp; SERIES
+      <h1 class="text-3xl md:text-5xl font-black gold-gradient-text pt-2">
+        Movies &amp; Series
       </h1>
-      <p class="text-gray-400 text-sm md:text-base max-w-lg mx-auto leading-relaxed font-normal">
-        النظام المركزي المتكامل لتجميع محركات البث السحابي، فهارس السينما العالمية، وأنظمة الترجمة الاحترافية بتصميم هندسي خالٍ من الضوضاء البصرية.
+      <p class="text-gray-400 text-sm md:text-base max-w-lg mx-auto leading-relaxed">
+        منظومة متكاملة تجمع أقوى سيرفرات البث السحابي الفوري والترجمة العربية التلقائية بتصميم فخم ومرتب بدون أي تعارض بين الإضافات.
       </p>
     </div>
 
-    <!-- System Telemetry & Catalogs Preview -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 my-8" dir="ltr">
-      <div class="spec-pill p-3.5 text-center">
-        <div class="text-xs text-gray-500 font-mono-tech">CATALOGS</div>
-        <div class="text-sm font-bold text-[#f3e5ab] font-mono-tech mt-1">MOVIES / SERIES</div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 my-7">
+      <div class="spec-box p-3.5 rounded-lg text-center">
+        <div class="text-xs text-gray-400">الأقسام الرئيسية</div>
+        <div class="text-sm font-bold text-[#f3e5ab] mt-1">Movies / Series</div>
       </div>
-      <div class="spec-pill p-3.5 text-center">
-        <div class="text-xs text-gray-500 font-mono-tech">PLUGINS</div>
-        <div class="text-sm font-bold text-[#f3e5ab] font-mono-tech mt-1">22 INTEGRATED</div>
+      <div class="spec-box p-3.5 rounded-lg text-center">
+        <div class="text-xs text-gray-400">منع التداخل</div>
+        <div class="text-sm font-bold text-emerald-400 mt-1">مفعل 100%</div>
       </div>
-      <div class="spec-pill p-3.5 text-center">
-        <div class="text-xs text-gray-500 font-mono-tech">CLOUD ENGINE</div>
-        <div class="text-sm font-bold text-emerald-400 font-mono-tech mt-1">TORBOX ACTIVE</div>
+      <div class="spec-box p-3.5 rounded-lg text-center">
+        <div class="text-xs text-gray-400">التخزين السحابي</div>
+        <div class="text-sm font-bold text-[#f3e5ab] mt-1">TorBox فوري</div>
       </div>
-      <div class="spec-pill p-3.5 text-center">
-        <div class="text-xs text-gray-500 font-mono-tech">RESOLUTION</div>
-        <div class="text-sm font-bold text-[#f3e5ab] font-mono-tech mt-1">UP TO 8K HDR</div>
+      <div class="spec-box p-3.5 rounded-lg text-center">
+        <div class="text-xs text-gray-400">دقة العرض</div>
+        <div class="text-sm font-bold text-[#f3e5ab] mt-1">حتى 8K و 4K</div>
       </div>
     </div>
 
-    <!-- Active Modules Matrix -->
     <div class="space-y-3 mb-8">
-      <div class="flex items-center justify-between p-4 spec-pill">
+      <div class="flex items-center justify-between p-4 spec-box rounded-lg">
         <div>
-          <div class="text-sm font-bold text-white tracking-wide">MOVIES &amp; SERIES MASTER CATALOGS</div>
-          <div class="text-xs text-gray-400 mt-0.5">Cinemeta + TMDB + Cyberflix + Streaming Networks + Kitsu</div>
+          <div class="text-sm font-bold text-white">كتالوجات مستقلة بدون تكرار (Movies &amp; Series)</div>
+          <div class="text-xs text-gray-400 mt-1">فصل تام بين قوائم الأفلام والمسلسلات لمنع تداخل البوسترات والمعلومات</div>
         </div>
-        <span class="text-xs font-mono-tech px-3 py-1 border border-[#d4af37]/40 text-[#f3e5ab] bg-[#d4af37]/10">ONLINE</span>
+        <span class="text-xs font-bold px-3 py-1 rounded border border-[#d4af37]/40 text-[#f3e5ab] bg-[#d4af37]/10">نشط</span>
       </div>
 
-      <div class="flex items-center justify-between p-4 spec-pill">
+      <div class="flex items-center justify-between p-4 spec-box rounded-lg">
         <div>
-          <div class="text-sm font-bold text-white tracking-wide">MULTI-SCRAPER STREAM FEDERATION</div>
-          <div class="text-xs text-gray-400 mt-0.5">Torrentio + KnightCrawler + Comet + MediaFusion + Annatar + YTS</div>
+          <div class="text-sm font-bold text-white">فلتر توحيد الروابط ومنع تكرار السيرفرات</div>
+          <div class="text-xs text-gray-400 mt-1">دمج ذكي للسيرفرات المتشابهة وترتيب السحابي الفوري في الصدارة</div>
         </div>
-        <span class="text-xs font-mono-tech px-3 py-1 border border-[#d4af37]/40 text-[#f3e5ab] bg-[#d4af37]/10">ONLINE</span>
+        <span class="text-xs font-bold px-3 py-1 rounded border border-[#d4af37]/40 text-[#f3e5ab] bg-[#d4af37]/10">نشط</span>
       </div>
 
-      <div class="flex items-center justify-between p-4 spec-pill">
+      <div class="flex items-center justify-between p-4 spec-box rounded-lg">
         <div>
-          <div class="text-sm font-bold text-white tracking-wide">ARABIC &amp; GLOBAL SUBTITLE MATRIX</div>
-          <div class="text-xs text-gray-400 mt-0.5">SubDL + OpenSubtitles V3 + Subscene + Podnapisi + YIFY Subs</div>
+          <div class="text-sm font-bold text-white">محرك الترجمة العربية الموحد</div>
+          <div class="text-xs text-gray-400 mt-1">جلب تلقائي للترجمات العربية من SubDL و Subscene و OpenSubtitles</div>
         </div>
-        <span class="text-xs font-mono-tech px-3 py-1 border border-[#d4af37]/40 text-[#f3e5ab] bg-[#d4af37]/10">ONLINE</span>
+        <span class="text-xs font-bold px-3 py-1 rounded border border-[#d4af37]/40 text-[#f3e5ab] bg-[#d4af37]/10">نشط</span>
       </div>
     </div>
 
-    <!-- Action Controls -->
     <div class="space-y-3">
-      <a href="stremio://${host}/manifest.json" class="gold-btn w-full py-4 px-6 font-black text-center block tracking-wide text-sm md:text-base uppercase">
-        تثبيت الإضافة مباشرة في STREMIO
+      <a href="stremio://${host}/manifest.json" class="gold-btn w-full py-4 px-6 rounded-xl font-black text-center block text-base">
+        تثبيت الإضافة مباشرة في التطبيق
       </a>
-      <button onclick="navigator.clipboard.writeText('https://${host}/manifest.json'); this.innerText='MANIFEST URL COPIED TO CLIPBOARD';" class="w-full py-3.5 px-4 bg-white/5 hover:bg-white/10 border border-white/15 text-xs font-mono-tech tracking-widest text-gray-300 transition-all text-center uppercase">
-        COPY MANIFEST ENDPOINT URL
+      <button onclick="navigator.clipboard.writeText('https://${host}/manifest.json'); this.innerText='تم نسخ رابط الإضافة بنجاح';" class="w-full py-3.5 px-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-xs font-bold text-gray-300 transition-all text-center">
+        نسخ رابط التثبيت اليدوي (Manifest URL)
       </button>
-    </div>
-
-    <!-- Footer Status -->
-    <div class="mt-8 pt-5 border-t border-white/10 flex items-center justify-between text-xs text-gray-500 font-mono-tech" dir="ltr">
-      <span>HOST: ${host}</span>
-      <span>ZERO-EMOJI LUXURY DESIGN</span>
     </div>
   </div>
 </body>
@@ -504,12 +456,11 @@ function renderConfigPage(host) {
 }
 
 // =========================================================================
-// 5. موجه الخادم الرئيسي الفائق (Master Federation Router)
+// 5. موجه الخادم الرئيسي المعزول ضد الأخطاء والتداخل (Master Handler)
 // =========================================================================
 
 export default async function handler(req, res) {
   try {
-    // ترويسات الأمان، CORS، والتخزين المؤقت السريع
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "*");
@@ -524,36 +475,34 @@ export default async function handler(req, res) {
     const path = decodeURIComponent(rawUrl.split("?")[0]).replace(/\/+$/, "") || "/";
 
     // -----------------------------------------------------------------
-    // أ. مسار فحص حالة الخادم والإحصائيات (Health & Telemetry Endpoint)
+    // أ. فحص حالة الخادم
     // -----------------------------------------------------------------
     if (path === "/health" || path === "/status") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       return res.status(200).json({
-        status: "OPERATIONAL",
-        version: "9.0.0",
-        architecture: "Sovereign Zero-Emoji Edition",
-        cacheEntries: memoryCache.size,
-        integratedAddonsCount: Object.keys(UPSTREAM_ADDONS).length
+        status: "نشط",
+        version: "10.0.0",
+        cacheSize: memoryCache.size
       });
     }
 
     // -----------------------------------------------------------------
-    // ب. ملف التعريف الفخم (Manifest) - أقسام Movies و Series بدون إيموجي
+    // ب. ملف التعريف (Manifest) - كتالوجات Movies و Series صافية بدون تداخل
     // -----------------------------------------------------------------
     if (path === "/manifest.json" || path === "/api/index" || path === "/api" || path === "/manifest") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       return res.status(200).json({
-        id: "org.sovereign.movies.series.hub",
-        version: "9.0.0",
+        id: "org.sovereign.arabic.movies.series",
+        version: "10.0.0",
         name: "Movies & Series",
-        description: "Sovereign Cinema Federation | 22+ Integrated Plugins | TorBox Cloud & Multi-Scraper Engine | Arabic Subtitles Matrix",
+        description: "المركز السيادي للأفلام والمسلسلات | بث سحابي فوري وترجمة عربية تلقائية بدون تداخل",
         resources: ["stream", "subtitles", "catalog", "meta"],
-        types: ["movie", "series", "anime"],
+        types: ["movie", "series"],
         idPrefixes: ["tt", "kitsu"],
         catalogs: [
           {
             type: "movie",
-            id: "sovereign_movies_top",
+            id: "sovereign_movies_main",
             name: "Movies",
             extra: [
               { name: "search", isRequired: false },
@@ -563,7 +512,7 @@ export default async function handler(req, res) {
           },
           {
             type: "series",
-            id: "sovereign_series_top",
+            id: "sovereign_series_main",
             name: "Series",
             extra: [
               { name: "search", isRequired: false },
@@ -574,25 +523,13 @@ export default async function handler(req, res) {
           {
             type: "movie",
             id: "sovereign_movies_featured",
-            name: "Movies // Featured Cinema",
+            name: "Movies // المختارة",
             extra: [{ name: "skip", isRequired: false }]
           },
           {
             type: "series",
             id: "sovereign_series_featured",
-            name: "Series // Premier Networks",
-            extra: [{ name: "skip", isRequired: false }]
-          },
-          {
-            type: "movie",
-            id: "sovereign_movies_4k",
-            name: "Movies // Box Office",
-            extra: [{ name: "skip", isRequired: false }]
-          },
-          {
-            type: "series",
-            id: "sovereign_series_trending",
-            name: "Series // Global Trending",
+            name: "Series // المختارة",
             extra: [{ name: "skip", isRequired: false }]
           }
         ],
@@ -603,85 +540,64 @@ export default async function handler(req, res) {
       });
     }
 
-    // عرض الصفحة الرئيسية الفخمة عند فتح الرابط في المتصفح
     if (path === "" || path === "/") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.status(200).send(renderConfigPage(host));
     }
 
     // -----------------------------------------------------------------
-    // ج. مسار الكتالوجات الموحدة (Movies & Series Unified Catalogs)
+    // ج. مسار الكتالوجات (مصدر واحد لكل طلب لمنع تداخل الترتيب والصفحات)
     // -----------------------------------------------------------------
     if (path.includes("/catalog/")) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       const subPath = path.substring(path.indexOf("/catalog/"));
       const parts = subPath.split("/").filter(Boolean);
       const type = parts[1] || "movie";
-      const rawCatalogAndExtra = (parts[2] || "").replace(".json", "");
+      const catalogId = (parts[2] || "").replace(".json", "");
       const extraPart = parts[3] ? parts[3].replace(".json", "") : "";
 
-      const cacheKey = `cat_${type}_${rawCatalogAndExtra}_${extraPart}`;
+      const cacheKey = `cat_${type}_${catalogId}_${extraPart}`;
       const cachedCat = getFromCache(cacheKey);
       if (cachedCat) return res.status(200).json(cachedCat);
 
-      let catalogUrls = [];
-
-      // دعم البحث أو الفلترة بالـ Genre أو التمرير (Pagination)
       const extraSuffix = extraPart ? `/${extraPart}.json` : ".json";
+      let primaryUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${extraSuffix}`;
+      let fallbackUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.top${extraSuffix}`;
 
-      if (rawCatalogAndExtra === "sovereign_movies_featured") {
-        catalogUrls = [
-          `${UPSTREAM_ADDONS.cyberflix}/catalog/movie/netflix${extraSuffix}`,
-          `${UPSTREAM_ADDONS.cinemeta}/catalog/movie/top${extraSuffix}`
-        ];
-      } else if (rawCatalogAndExtra === "sovereign_series_featured") {
-        catalogUrls = [
-          `${UPSTREAM_ADDONS.cyberflix}/catalog/series/apple${extraSuffix}`,
-          `${UPSTREAM_ADDONS.cinemeta}/catalog/series/top${extraSuffix}`
-        ];
-      } else if (rawCatalogAndExtra === "sovereign_movies_4k") {
-        catalogUrls = [
-          `${UPSTREAM_ADDONS.cinemeta}/catalog/movie/year${extraSuffix}`,
-          `${UPSTREAM_ADDONS.tmdbAddon}/catalog/movie/tmdb.top${extraSuffix}`
-        ];
-      } else if (rawCatalogAndExtra === "sovereign_series_trending") {
-        catalogUrls = [
-          `${UPSTREAM_ADDONS.cinemeta}/catalog/series/imdbRating${extraSuffix}`,
-          `${UPSTREAM_ADDONS.tmdbAddon}/catalog/series/tmdb.top${extraSuffix}`
-        ];
-      } else {
-        // الكتالوجات الرئيسية: Movies و Series
-        catalogUrls = [
-          `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${extraSuffix}`,
-          `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.top${extraSuffix}`
-        ];
+      if (catalogId === "sovereign_movies_featured") {
+        primaryUrl = `${UPSTREAM_ADDONS.cyberflix}/catalog/movie/netflix${extraSuffix}`;
+      } else if (catalogId === "sovereign_series_featured") {
+        primaryUrl = `${UPSTREAM_ADDONS.cyberflix}/catalog/series/apple${extraSuffix}`;
       }
 
-      const results = await Promise.all(catalogUrls.map(u => safeFetchJson(u)));
-      const mergedMetas = [];
+      // جلب من المصدر الأساسي أولاً، وإذا فشل ننتقل للاحتياطي لمنع تداخل القوائم
+      let data = await safeFetchJson(primaryUrl);
+      if (!data || !Array.isArray(data.metas) || data.metas.length === 0) {
+        data = await safeFetchJson(fallbackUrl);
+      }
+
+      const cleanMetas = [];
       const seenIds = new Set();
 
-      for (const resData of results) {
-        if (resData && Array.isArray(resData.metas)) {
-          for (const m of resData.metas) {
-            if (m && m.id && !seenIds.has(m.id)) {
-              seenIds.add(m.id);
-              mergedMetas.push({
-                ...m,
-                name: stripAllEmojis(m.name || "")
-              });
-            }
+      if (data && Array.isArray(data.metas)) {
+        for (const m of data.metas) {
+          if (m && m.id && !seenIds.has(m.id)) {
+            seenIds.add(m.id);
+            cleanMetas.push({
+              ...m,
+              name: stripAllEmojis(m.name || "")
+            });
           }
         }
       }
 
-      const payload = { metas: mergedMetas };
-      if (mergedMetas.length > 0) saveToCache(cacheKey, payload);
+      const payload = { metas: cleanMetas };
+      if (cleanMetas.length > 0) saveToCache(cacheKey, payload);
       return res.status(200).json(payload);
     }
 
     // -----------------------------------------------------------------
-    // د. مسار تفاصيل العرض (Metadata Enrichment Engine)
+    // د. مسار تفاصيل العرض (Meta) بدون تعارض
     // -----------------------------------------------------------------
     if (path.includes("/meta/")) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -693,20 +609,19 @@ export default async function handler(req, res) {
       const cachedMeta = getFromCache(cacheKey);
       if (cachedMeta) return res.status(200).json(cachedMeta);
 
-      const isKitsu = id.startsWith("kitsu:");
-      const metaSources = isKitsu
-        ? [`${UPSTREAM_ADDONS.animeKitsu}/meta/${type}/${id}.json`]
-        : [
-            `${UPSTREAM_ADDONS.cinemeta}/meta/${type}/${id}.json`,
-            `${UPSTREAM_ADDONS.tmdbAddon}/meta/${type}/${id}.json`
-          ];
+      let metaRes = null;
+      if (id.startsWith("kitsu:")) {
+        metaRes = await safeFetchJson(`${UPSTREAM_ADDONS.animeKitsu}/meta/${type}/${id}.json`);
+      } else {
+        metaRes = await safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/meta/${type}/${id}.json`);
+        if (!metaRes || !metaRes.meta) {
+          metaRes = await safeFetchJson(`${UPSTREAM_ADDONS.tmdbAddon}/meta/${type}/${id}.json`);
+        }
+      }
 
-      const responses = await Promise.all(metaSources.map(u => safeFetchJson(u)));
-      const primaryMeta = responses.find(r => r && r.meta)?.meta || null;
-
-      if (primaryMeta) {
-        primaryMeta.name = stripAllEmojis(primaryMeta.name || "");
-        const resultObj = { meta: primaryMeta };
+      if (metaRes && metaRes.meta) {
+        metaRes.meta.name = stripAllEmojis(metaRes.meta.name || "");
+        const resultObj = { meta: metaRes.meta };
         saveToCache(cacheKey, resultObj);
         return res.status(200).json(resultObj);
       }
@@ -715,7 +630,7 @@ export default async function handler(req, res) {
     }
 
     // -----------------------------------------------------------------
-    // هـ. مسار الترجمات الموسع (6 محركات ترجمة مع أولوية العربية)
+    // هـ. مسار الترجمات العربية (معزول ومفلتر)
     // -----------------------------------------------------------------
     if (path.includes("/subtitles/")) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -728,11 +643,10 @@ export default async function handler(req, res) {
       const cachedSubs = getFromCache(cacheKey);
       if (cachedSubs) return res.status(200).json({ subtitles: cachedSubs });
 
-      const subQueries = [
+      const [subdlRes, subsceneRes, osV3Res, yifyRes, osDirectRes] = await Promise.all([
         safeFetchJson(`${UPSTREAM_ADDONS.subdl}/subtitles/${type}/${id}.json`),
-        safeFetchJson(`${UPSTREAM_ADDONS.opensubtitlesV3}/subtitles/${type}/${id}.json`),
         safeFetchJson(`${UPSTREAM_ADDONS.subscene}/subtitles/${type}/${id}.json`),
-        safeFetchJson(`${UPSTREAM_ADDONS.podnapisi}/subtitles/${type}/${id}.json`),
+        safeFetchJson(`${UPSTREAM_ADDONS.opensubtitlesV3}/subtitles/${type}/${id}.json`),
         type === "movie" ? safeFetchJson(`${UPSTREAM_ADDONS.yifysubs}/subtitles/${type}/${id}.json`) : Promise.resolve(null),
         OPENSUBTITLES_API_KEY && imdbId.startsWith("tt")
           ? safeFetchJson(
@@ -740,9 +654,8 @@ export default async function handler(req, res) {
               { "Api-Key": OPENSUBTITLES_API_KEY }
             )
           : Promise.resolve(null)
-      ];
+      ]);
 
-      const [subdlRes, osV3Res, subsceneRes, podnapisiRes, yifyRes, osDirectRes] = await Promise.all(subQueries);
       const collected = [];
 
       const appendSubs = (data, defaultLang = "ar") => {
@@ -762,7 +675,6 @@ export default async function handler(req, res) {
       appendSubs(subdlRes, "ar");
       appendSubs(subsceneRes, "ar");
       appendSubs(osV3Res, "en");
-      appendSubs(podnapisiRes, "en");
       appendSubs(yifyRes, "en");
 
       if (osDirectRes && Array.isArray(osDirectRes.data)) {
@@ -778,7 +690,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // إزالة الروابط المكررة وترتيب الترجمة العربية في الصدارة دائماً
       const uniqueMap = new Map();
       for (const sub of collected) {
         if (!uniqueMap.has(sub.url)) {
@@ -797,7 +708,7 @@ export default async function handler(req, res) {
     }
 
     // -----------------------------------------------------------------
-    // و. مسار البث المتعدد الفائق (10 محركات بث مدمجة + TorBox + فلترة ذكية)
+    // و. مسار البث الموحد (منع تداخل البلوقنات وتكرار نفس التورنت)
     // -----------------------------------------------------------------
     if (path.includes("/stream/")) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -810,38 +721,30 @@ export default async function handler(req, res) {
       const type = parts[1] || "movie";
       const id = (parts[2] || "").replace(".json", "");
 
-      // استدعاء متوازي لأقوى 10 محركات بث عالمية في نفس اللحظة
+      // استدعاء البلوقنات المستقرة فقط والتي لا تتعارض مع بعضها
       const [
         torrentioData,
-        knightcrawlerData,
-        mediafusionData,
-        cometData,
         tpbData,
         ytsData,
         eztvData,
         webstreamrData,
-        watchhubData,
         publicDomainData
       ] = await Promise.all([
         safeFetchJson(`${UPSTREAM_URL}${streamSubPath}`),
-        safeFetchJson(`${UPSTREAM_ADDONS.knightcrawler}/stream/${type}/${id}.json`),
-        safeFetchJson(`${UPSTREAM_ADDONS.mediafusion}/stream/${type}/${id}.json`),
-        safeFetchJson(`${UPSTREAM_ADDONS.comet}/stream/${type}/${id}.json`),
         safeFetchJson(`${UPSTREAM_ADDONS.tpbPlus}/stream/${type}/${id}.json`),
         type === "movie" ? safeFetchJson(`${UPSTREAM_ADDONS.yts}/stream/${type}/${id}.json`) : Promise.resolve(null),
         type === "series" ? safeFetchJson(`${UPSTREAM_ADDONS.eztv}/stream/${type}/${id}.json`) : Promise.resolve(null),
         safeFetchJson(`${UPSTREAM_ADDONS.webstreamr}/stream/${type}/${id}.json`),
-        safeFetchJson(`${UPSTREAM_ADDONS.watchhub}/stream/${type}/${id}.json`),
         type === "movie" ? safeFetchJson(`${UPSTREAM_ADDONS.publicDomain}/stream/${type}/${id}.json`) : Promise.resolve(null)
       ]);
 
       const rawCandidates = [];
 
-      const ingestStreams = (dataObj, label) => {
+      const ingestStreams = (dataObj, arabicLabel) => {
         if (dataObj && Array.isArray(dataObj.streams)) {
           for (const s of dataObj.streams) {
+            if (!s || (!s.url && !s.infoHash)) continue;
             const combinedText = `${s.name || ""} ${s.title || ""} ${s.description || ""}`.toLowerCase();
-            // استبعاد نسخ التصوير السينمائي الرديئة
             if (
               combinedText.includes("hdcam") ||
               combinedText.includes("camrip") ||
@@ -850,54 +753,22 @@ export default async function handler(req, res) {
             ) {
               continue;
             }
-            rawCandidates.push(cleanAndFormatStream(s, label));
+            rawCandidates.push(cleanAndFormatStream(s, arabicLabel));
           }
         }
       };
 
-      // تغذية المحرك بالتيارات من كافة الإضافات المحسنة
-      ingestStreams(torrentioData, "TORRENTIO");
-      ingestStreams(knightcrawlerData, "KNIGHTCRAWLER");
-      ingestStreams(mediafusionData, "MEDIAFUSION");
-      ingestStreams(cometData, "COMET");
-      ingestStreams(tpbData, "TPB+");
-      ingestStreams(ytsData, "YTS");
-      ingestStreams(eztvData, "EZTV");
-      ingestStreams(webstreamrData, "WEBSTREAM");
+      ingestStreams(torrentioData, "سحابي رئيسي");
+      ingestStreams(webstreamrData, "سيرفر ويب");
+      ingestStreams(ytsData, "أفلام YTS");
+      ingestStreams(eztvData, "مسلسلات EZTV");
+      ingestStreams(tpbData, "تورنت عام");
+      ingestStreams(publicDomainData, "أرشيف كلاسيكي");
 
-      // إضافة مصادر الملكية العامة والمنصات الرسمية بدون أي إيموجي
-      if (publicDomainData && Array.isArray(publicDomainData.streams)) {
-        for (const s of publicDomainData.streams) {
-          rawCandidates.push({
-            ...s,
-            name: "[ PUBLIC ARCHIVE ]  ::  CLASSIC MASTER",
-            title: "──────────────────────────────────────────────────\nSRC: PUBLIC DOMAIN   |   STATUS: DIRECT STREAM",
-            _score: 50,
-            _hash: s.url || s.infoHash || "pd"
-          });
-        }
-      }
-
-      if (watchhubData && Array.isArray(watchhubData.streams)) {
-        for (const s of watchhubData.streams) {
-          rawCandidates.push({
-            ...s,
-            name: `[ OFFICIAL PLATFORM ]  ::  ${stripAllEmojis(s.name || "DIRECT").toUpperCase()}`,
-            title: `──────────────────────────────────────────────────\n${stripAllEmojis(s.title || "VERIFIED OFFICIAL STREAM")}`,
-            _score: 10,
-            _hash: s.url || s.externalUrl || "wh"
-          });
-        }
-      }
-
-      // منع تكرار نفس التورنت أو الرابط مع الاحتفاظ بالنسخة الأعلى تقييماً
+      // فلترة صارمة لمنع تداخل أو تكرار نفس الرابط بين البلوقنات المختلفة
       const uniqueStreamsMap = new Map();
       for (const item of rawCandidates) {
         const key = item._hash;
-        if (!key) {
-          uniqueStreamsMap.set(`anon_${Math.random()}`, item);
-          continue;
-        }
         const existing = uniqueStreamsMap.get(key);
         if (!existing || (item._score || 0) > (existing._score || 0)) {
           uniqueStreamsMap.set(key, item);
@@ -905,17 +776,13 @@ export default async function handler(req, res) {
       }
 
       const deduplicated = Array.from(uniqueStreamsMap.values());
-
-      // ترتيب تنازلي صارم: TorBox السحابي أولاً ثم 8K/4K Remux ثم الأعلى في الـ Peers
       deduplicated.sort((a, b) => (b._score || 0) - (a._score || 0));
 
-      // تنظيف الحقول الداخلية قبل الإرسال إلى Stremio
-      const finalStreams = deduplicated.slice(0, 120).map(({ _score, _hash, ...cleanItem }) => cleanItem);
+      const finalStreams = deduplicated.slice(0, 80).map(({ _score, _hash, ...cleanItem }) => cleanItem);
 
       if (finalStreams.length > 0) {
         saveToCache(cacheKey, finalStreams);
       } else {
-        // محاولة استرجاع نسخة مخزنة قديمة في حال انقطاع كافة المصادر الخارجية مؤقتاً
         const stale = getFromCache(cacheKey, true);
         if (stale) return res.status(200).json({ streams: stale });
       }
@@ -923,15 +790,13 @@ export default async function handler(req, res) {
       return res.status(200).json({ streams: finalStreams });
     }
 
-    // الرد الافتراضي الآمن
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     return res.status(200).json({
-      status: "ONLINE",
-      name: "Movies & Series // Sovereign Aggregator V9.0"
+      status: "نشط",
+      name: "Movies & Series // المركز السيادي V10.0"
     });
 
   } catch {
-    // حماية مطلقة من أي انهيار (Crash-Proof Fallback)
     return res.status(200).json({ streams: [], metas: [], subtitles: [] });
   }
 }
