@@ -215,7 +215,7 @@ function renderConfigPage(host) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stremio Master Hub Ultra Pro</title>
+  <title>مركز الأفلام والمسلسلات</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
   <style>
@@ -234,38 +234,34 @@ function renderConfigPage(host) {
         </svg>
       </div>
       <h1 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-300 to-pink-400">
-        Stremio Master Hub Ultra
+        مركز الأفلام والمسلسلات
       </h1>
       <p class="text-gray-400 text-sm leading-relaxed">
-        الملحق الفائق الجامع لكل إمكانيات Stremio: تصنيفات Netflix & Disney، ترجمات SubDL و OpenSubtitles العربية، تدفق TorBox السحابي مع تنظيف كامل للجودات.
+        إضافة شاملة لترتيب أحدث الأفلام والمسلسلات بأعلى جودة، مع ترجمة عربية تلقائية وروابط تشغيل مباشرة وسريعة.
       </p>
     </div>
 
     <div class="mt-8 space-y-3">
       <div class="flex items-center justify-between p-3.5 rounded-xl bg-gray-800/40 border border-gray-700/50">
-        <span class="text-sm font-semibold flex items-center gap-2">⚡ تدفق سحابي فوري (TorBox / Torrentio)</span>
+        <span class="text-sm font-semibold flex items-center gap-2">🎬 أحدث الأفلام والمسلسلات</span>
         <span class="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 font-bold">مُفعل</span>
       </div>
       <div class="flex items-center justify-between p-3.5 rounded-xl bg-gray-800/40 border border-gray-700/50">
-        <span class="text-sm font-semibold flex items-center gap-2">🎬 منصات البث (Netflix, Apple, Disney, HBO)</span>
+        <span class="text-sm font-semibold flex items-center gap-2">💬 ترجمات عربية تلقائية شاملة</span>
         <span class="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 font-bold">مُفعل</span>
       </div>
       <div class="flex items-center justify-between p-3.5 rounded-xl bg-gray-800/40 border border-gray-700/50">
-        <span class="text-sm font-semibold flex items-center gap-2">💬 ترجمات عربية ذكية (SubDL + OpenSubtitles v3)</span>
-        <span class="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 font-bold">مُفعل</span>
-      </div>
-      <div class="flex items-center justify-between p-3.5 rounded-xl bg-gray-800/40 border border-gray-700/50">
-        <span class="text-sm font-semibold flex items-center gap-2">🏛️ سينما كلاسيكية (Cinemeta + Public Domain)</span>
+        <span class="text-sm font-semibold flex items-center gap-2">⚡ تشغيل سحابي سريع وتلقائي</span>
         <span class="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 font-bold">مُفعل</span>
       </div>
     </div>
 
     <div class="mt-8 space-y-4">
       <a href="stremio://${host}/manifest.json" class="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 font-bold text-center block text-white shadow-lg shadow-indigo-500/30 transform hover:-translate-y-0.5 transition-all text-base">
-        🚀 تثبيت الملحق في Stremio بضغطة واحدة
+        🚀 تثبيت الإضافة بضغطة واحدة
       </a>
       <button onclick="navigator.clipboard.writeText('https://${host}/manifest.json'); this.innerText='تم نسخ الرابط بنجاح! ✓';" class="w-full py-3 px-4 rounded-xl bg-gray-800/80 hover:bg-gray-800 border border-gray-700 text-sm font-semibold text-gray-300 transition-all text-center">
-        📋 نسخ رابط الـ Manifest يدوياً
+        📋 نسخ رابط الإضافة يدوياً
       </button>
     </div>
   </div>
@@ -294,47 +290,37 @@ export default async function handler(req, res) {
     const path = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
 
     // ----------------------------------------------------
-    // أ. ملف التعريف الشامل (Federated Manifest) - متوافق كلياً مع Stremio و Nuvio
+    // أ. ملف التعريف الشامل (Federated Manifest) - تعريب كامل وتبسيط المسميات
     // ----------------------------------------------------
     if (path === "/manifest.json" || path === "/api/index" || path === "/api" || path === "/manifest") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       return res.status(200).json({
-        id: "org.allinone.torrentio.master.ultra",
-        version: "5.5.0",
-        name: "Stremio Master Hub Ultra Pro",
-        description: "مجمع شامل يدمج تلقائياً: تدفقات TorBox السحابية، كتالوجات منصات البث (Netflix & Disney)، ترجمات SubDL و OpenSubtitles العربية، ومكتبات Cinemeta & Public Domain",
+        id: "org.arabic.media.hub",
+        version: "6.0.0",
+        name: "الأفلام والمسلسلات",
+        description: "مكتبة عربية شاملة لأحدث الأفلام والمسلسلات بأعلى جودة مع دعم الترجمة التلقائية",
         resources: ["stream", "subtitles", "catalog", "meta"],
-        types: ["movie", "series", "anime", "other"],
+        types: ["movie", "series"],
         catalogs: [
           {
             type: "movie",
-            id: "top_cinemeta_movies",
-            name: "🔥 أفلام رائجة (Cinemeta)"
+            id: "featured_movies",
+            name: "🔥 أحدث الأفلام"
           },
           {
             type: "series",
-            id: "top_cinemeta_series",
-            name: "📺 مسلسلات مميزة (Cinemeta)"
+            id: "featured_series",
+            name: "📺 أفضل المسلسلات"
           },
           {
             type: "movie",
-            id: "cyberflix_netflix_movies",
-            name: "🍿 أفلام نتفلكس (Netflix Hub)"
+            id: "cinema_movies",
+            name: "🍿 أفلام السينما المميزة"
           },
           {
             type: "series",
-            id: "cyberflix_apple_series",
-            name: "🍏 مسلسلات Apple TV+"
-          },
-          {
-            type: "movie",
-            id: "cyberflix_disney_movies",
-            name: "✨ أفلام Disney+ Originals"
-          },
-          {
-            type: "movie",
-            id: "public_domain_classics",
-            name: "🏛️ كلاسيكيات السينما المجانية"
+            id: "popular_shows",
+            name: "✨ مسلسلات حصرية مختارة"
           }
         ],
         behaviorHints: {
@@ -351,52 +337,6 @@ export default async function handler(req, res) {
     }
 
     // ----------------------------------------------------
-    // أ. ملف التعريف الشامل (Federated Manifest)
-    // ----------------------------------------------------
-    if (path === "/manifest.json" || path === "/api/index" || path === "/api") {
-      return res.status(200).json({
-        id: "org.allinone.torrentio.master.ultra",
-        version: "5.5.0",
-        name: "Stremio Master Hub Ultra Pro",
-        description: "مجمع شامل يدمج تلقائياً: تدفقات TorBox السحابية، كتالوجات منصات البث (Netflix & Disney)، ترجمات SubDL و OpenSubtitles العربية، ومكتبات Cinemeta & Public Domain",
-        resources: ["stream", "subtitles", "catalog", "meta"],
-        types: ["movie", "series", "anime", "other"],
-        catalogs: [
-          {
-            type: "movie",
-            id: "top_cinemeta_movies",
-            name: "🔥 أفلام رائجة (Cinemeta)"
-          },
-          {
-            type: "series",
-            id: "top_cinemeta_series",
-            name: "📺 مسلسلات مميزة (Cinemeta)"
-          },
-          {
-            type: "movie",
-            id: "cyberflix_netflix_movies",
-            name: "🍿 أفلام نتفلكس (Netflix Hub)"
-          },
-          {
-            type: "series",
-            id: "cyberflix_apple_series",
-            name: "🍏 مسلسلات Apple TV+"
-          },
-          {
-            type: "movie",
-            id: "cyberflix_disney_movies",
-            name: "✨ أفلام Disney+ Originals"
-          },
-          {
-            type: "movie",
-            id: "public_domain_classics",
-            name: "🏛️ كلاسيكيات السينما المجانية"
-          }
-        ]
-      });
-    }
-
-    // ----------------------------------------------------
     // ب. مسار الكتالوجات المدمجة تلقائياً (Catalogs Aggregation)
     // ----------------------------------------------------
     if (path.includes("/catalog/")) {
@@ -408,33 +348,29 @@ export default async function handler(req, res) {
       const cachedCat = getFromCache(cacheKey);
       if (cachedCat) return res.status(200).json(cachedCat);
 
-      // 1. كلاسيكيات سينما الملكية العامة (Public Domain)
-      if (catalogId === "public_domain_classics") {
-        const pdData = await safeFetchJson(`${UPSTREAM_ADDONS.publicDomain}/catalog/movie/public_domain_movies.json`);
-        if (pdData && Array.isArray(pdData.metas)) {
-          saveToCache(cacheKey, pdData);
-          return res.status(200).json(pdData);
-        }
-      }
-
-      // 2. كتالوجات منصات البث (CyberFlix Proxy: Netflix, Apple, Disney)
-      if (catalogId.startsWith("cyberflix_")) {
-        let cfPlatform = "netflix";
-        if (catalogId.includes("apple")) cfPlatform = "apple";
-        else if (catalogId.includes("disney")) cfPlatform = "disney";
-        
-        const cfData = await safeFetchJson(`${UPSTREAM_ADDONS.cyberflix}/catalog/${type}/${cfPlatform}.json`);
+      // أفلام السينما المميزة
+      if (catalogId === "cinema_movies") {
+        const cfData = await safeFetchJson(`${UPSTREAM_ADDONS.cyberflix}/catalog/movie/netflix.json`);
         if (cfData && Array.isArray(cfData.metas)) {
           saveToCache(cacheKey, cfData);
           return res.status(200).json(cfData);
         }
       }
 
-      // 3. كتالوج Cinemeta الافتراضي المحدث
-      const cinemetaData = await safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top.json`);
-      if (cinemetaData && Array.isArray(cinemetaData.metas)) {
-        saveToCache(cacheKey, cinemetaData);
-        return res.status(200).json(cinemetaData);
+      // مسلسلات حصرية
+      if (catalogId === "popular_shows") {
+        const cfData = await safeFetchJson(`${UPSTREAM_ADDONS.cyberflix}/catalog/series/apple.json`);
+        if (cfData && Array.isArray(cfData.metas)) {
+          saveToCache(cacheKey, cfData);
+          return res.status(200).json(cfData);
+        }
+      }
+
+      // الكتالوج الرئيسي للأفلام والمسلسلات
+      const mainData = await safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top.json`);
+      if (mainData && Array.isArray(mainData.metas)) {
+        saveToCache(cacheKey, mainData);
+        return res.status(200).json(mainData);
       }
 
       return res.status(200).json({ metas: [] });
