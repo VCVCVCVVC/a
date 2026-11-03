@@ -195,30 +195,67 @@ function localizeGenres(genres) {
 // دالة تعريب فوري للنصوص الإنجليزية (القصة والعنوان) لتظهر بالعربية في الواجهة الرئيسية قبل الدخول
 async function translateToArabic(text) {
   if (!text || typeof text !== "string") return text;
-  // إذا كان النص يحتوي مسبقاً على حروف عربية، نرجعه كما هو
-  if (/[\u0600-\u06FF]/.test(text)) return text;
+  const cleanText = text.trim();
+  if (!cleanText) return cleanText;
 
-  const cacheKey = `tr_ar_${text.slice(0, 120)}`;
+  // فحص وجود نسبة كافية من الحروف العربية (أكثر من 4 حروف عربية متفرقة)
+  const arabicMatches = cleanText.match(/[\u0600-\u06FF]/g);
+  if (arabicMatches && arabicMatches.length > 5) return cleanText;
+
+  const cacheKey = `tr_ar_v2_${cleanText.slice(0, 140)}`;
   const cached = getFromCache(cacheKey, true);
   if (cached) return cached;
 
+  // المحرك الأول: Google Translate GTX السريع (بدون قفل Health Check)
   try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q=${encodeURIComponent(text)}`;
-    const data = await safeFetchJson(url, {}, 2500);
-    if (Array.isArray(data) && Array.isArray(data[0])) {
-      const translated = data[0].map(part => part[0]).join("").trim();
-      if (translated) {
-        saveToCache(cacheKey, translated);
-        return translated;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ar&dt=t&q=${encodeURIComponent(cleanText)}`;
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "Mozilla/5.0" }
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && Array.isArray(data[0])) {
+        const translated = data[0].map(part => (part && part[0]) ? part[0] : "").join("").trim();
+        if (translated && /[\u0600-\u06FF]/.test(translated)) {
+          saveToCache(cacheKey, translated);
+          return translated;
+        }
       }
     }
   } catch {
-    // تجاهل آمن عند فشل الترجمة
+    // الانتقال للمحرك الاحتياطي
   }
-  return text;
+
+  // المحرك الاحتياطي: Google Dictionary / Clients5 API
+  try {
+    const controller2 = new AbortController();
+    const timer2 = setTimeout(() => controller2.abort(), 3000);
+    const url2 = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=ar&q=${encodeURIComponent(cleanText)}`;
+    const res2 = await fetch(url2, {
+      signal: controller2.signal,
+      headers: { "User-Agent": "Mozilla/5.0" }
+    });
+    clearTimeout(timer2);
+    if (res2.ok) {
+      const data2 = await res2.json();
+      const candidate = Array.isArray(data2) ? (Array.isArray(data2[0]) ? data2[0][0] : data2[0]) : null;
+      if (typeof candidate === "string" && /[\u0600-\u06FF]/.test(candidate)) {
+        saveToCache(cacheKey, candidate.trim());
+        return candidate.trim();
+      }
+    }
+  } catch {
+    // تجاهل آمن
+  }
+
+  return cleanText;
 }
 
-// تعريب كائن الفيلم أو المسلسل بالكامل (الوصف، التصنيفات)
+// تعريب كائن الفيلم أو المسلسل بالكامل لجميع الحقول التي تقرأها الواجهة الخارجية (description / overview / synopsis)
 async function localizeMetaItem(item) {
   if (!item) return item;
   const localized = {
@@ -229,13 +266,226 @@ async function localizeMetaItem(item) {
   if (Array.isArray(localized.genres)) {
     localized.genres = localizeGenres(localized.genres);
   }
+  if (Array.isArray(localized.genre)) {
+    localized.genre = localizeGenres(localized.genre);
+  }
 
-  if (localized.description && !/[\u0600-\u06FF]/.test(localized.description)) {
-    localized.description = await translateToArabic(localized.description);
+  const rawPlot = localized.description || localized.overview || localized.synopsis || "";
+  if (rawPlot) {
+    const arabicPlot = await translateToArabic(rawPlot);
+    localized.description = arabicPlot;
+    localized.overview = arabicPlot;
+    localized.synopsis = arabicPlot;
   }
 
   return localized;
 }
+
+// قائمة منتقاة ومحدثة لأبرز المسلسلات العربية والخليجية والرمضانية مع قصصها العربية الكاملة
+const ARABIC_SERIES_CURATED = {
+  general: [
+    {
+      id: "tt13406136",
+      type: "series",
+      name: "ما وراء الطبيعة",
+      poster: "https://images.metahub.space/poster/medium/tt13406136/img",
+      background: "https://images.metahub.space/background/medium/tt13406136/img",
+      genres: ["دراما", "غموض", "رعب", "تشويق وإثارة"],
+      imdbRating: "8.0",
+      releaseInfo: "2020",
+      description: "في حقبة الستينيات من القرن الماضي، يعيش الطبيب رفعت إسماعيل أستاذ أمراض الدم سلسلة من الأحداث الخارقة للطبيعة التي تقلب قناعاته العلمية رأساً على عقب."
+    },
+    {
+      id: "tt27415216",
+      type: "series",
+      name: "الحشاشين",
+      poster: "https://images.metahub.space/poster/medium/tt27415216/img",
+      background: "https://images.metahub.space/background/medium/tt27415216/img",
+      genres: ["تاريخي", "دراما", "حركة وإثارة"],
+      imdbRating: "8.2",
+      releaseInfo: "2024",
+      description: "في القرن الحادي عشر، يؤسس حسن الصباح طائفة الحشاشين ويتخذ من قلعة آلموت الحصينة مقراً له، ناشراً الرعب والاغتيالات السياسية في أنحاء المنطقة."
+    },
+    {
+      id: "tt19380956",
+      type: "series",
+      name: "الصفارة",
+      poster: "https://images.metahub.space/poster/medium/tt19380956/img",
+      background: "https://images.metahub.space/background/medium/tt19380956/img",
+      genres: ["كوميديا", "فانتازيا"],
+      imdbRating: "7.7",
+      releaseInfo: "2023",
+      description: "مرشد سياحي يسرق صفارة أثرية للملك توت عنخ آمون تمنحه القدرة على العودة بالزمن ثلاث دقائق لتغيير حياته، لكن كل محاولة تقوده إلى مفاجآت غير متوقعة."
+    },
+    {
+      id: "tt14466294",
+      type: "series",
+      name: "لعبة نيوتن",
+      poster: "https://images.metahub.space/poster/medium/tt14466294/img",
+      background: "https://images.metahub.space/background/medium/tt14466294/img",
+      genres: ["دراما", "تشويق وإثارة"],
+      imdbRating: "8.4",
+      releaseInfo: "2021",
+      description: "يتخذ الزوجان هنا وحازم قراراً بالسفر إلى الولايات المتحدة لإنجاب طفلهما هناك، إلا أن رحلتهما تتحول إلى سلسلة من الأزمات المعقدة والمصيرية."
+    },
+    {
+      id: "tt27197059",
+      type: "series",
+      name: "تحت الوصاية",
+      poster: "https://images.metahub.space/poster/medium/tt27197059/img",
+      background: "https://images.metahub.space/background/medium/tt27197059/img",
+      genres: ["دراما"],
+      imdbRating: "8.6",
+      releaseInfo: "2023",
+      description: "أرملة شابة تقرر الهروب بمركب الصيد الخاص بزوجها الراحل مع طفليها إلى مدينة دمياط، لتخوض معركة شرسة في عالم الصيادين لحماية مستقبل أبنائها."
+    },
+    {
+      id: "tt18274572",
+      type: "series",
+      name: "الكبير أوي",
+      poster: "https://images.metahub.space/poster/medium/tt18274572/img",
+      background: "https://images.metahub.space/background/medium/tt18274572/img",
+      genres: ["كوميديا", "عائلي"],
+      imdbRating: "8.3",
+      releaseInfo: "2010",
+      description: "يوميات كوميدية ساخرة لعمدة قرية المزاريطة وأشقائه التوائم وسط مفارقات اجتماعية ومغامرات لا تنتهي مع أهل القرية."
+    },
+    {
+      id: "tt11969464",
+      type: "series",
+      name: "الاختيار",
+      poster: "https://images.metahub.space/poster/medium/tt11969464/img",
+      background: "https://images.metahub.space/background/medium/tt11969464/img",
+      genres: ["حركة وإثارة", "تاريخي", "دراما"],
+      imdbRating: "8.5",
+      releaseInfo: "2020",
+      description: "عمل درامي يوثق بطولات وتضحيات رجال الأمن والقوات المسلحة في مواجهة العمليات الإرهابية وحماية الأمن القومي."
+    },
+    {
+      id: "tt15438940",
+      type: "series",
+      name: "الغرفة 207",
+      poster: "https://images.metahub.space/poster/medium/tt15438940/img",
+      background: "https://images.metahub.space/background/medium/tt15438940/img",
+      genres: ["غموض", "رعب", "تشويق وإثارة"],
+      imdbRating: "7.8",
+      releaseInfo: "2022",
+      description: "في عام 1968 داخل فندق عريق، يكتشف موظف الاستقبال جمال الصواف أسراراً مرعبة وغامضة تحيط بالغرفة رقم 207 التي تغير مصير كل من يدخلها."
+    },
+    {
+      id: "tt6060992",
+      type: "series",
+      name: "الهيبة",
+      poster: "https://images.metahub.space/poster/medium/tt6060992/img",
+      background: "https://images.metahub.space/background/medium/tt6060992/img",
+      genres: ["حركة وإثارة", "جريمة", "دراما"],
+      imdbRating: "7.4",
+      releaseInfo: "2017",
+      description: "جبل شيخ الجبل يتزعم عشيرته في قرية حدودية تحكمها الأعراف العشائرية وتجارة السلاح، ويواجه صراعات دامية لحماية عائلته ونفوذه."
+    },
+    {
+      id: "tt13833688",
+      type: "series",
+      name: "مدرسة الروابي للبنات",
+      poster: "https://images.metahub.space/poster/medium/tt13833688/img",
+      background: "https://images.metahub.space/background/medium/tt13833688/img",
+      genres: ["دراما", "تشويق وإثارة"],
+      imdbRating: "7.2",
+      releaseInfo: "2021",
+      description: "تتحد مجموعة من الطالبات المهمشات في مدرسة مرموقة للانتقام من المتنمرات، ليكتشفن أن لكل شخص وجهاً آخر وأسراراً خفية."
+    }
+  ],
+  gulf: [
+    {
+      id: "tt11640018",
+      type: "series",
+      name: "رشاش",
+      poster: "https://images.metahub.space/poster/medium/tt11640018/img",
+      background: "https://images.metahub.space/background/medium/tt11640018/img",
+      genres: ["جريمة", "حركة وإثارة", "دراما"],
+      imdbRating: "8.7",
+      releaseInfo: "2021",
+      description: "عمل درامي سعودي مستوحى من أحداث حقيقية في الثمانينيات، يروي قصة عصابة رشاش والجهود الأمنية المكثفة للإيقاع بها وتقديمها للعدالة."
+    },
+    {
+      id: "tt7927936",
+      type: "series",
+      name: "العاصوف",
+      poster: "https://images.metahub.space/poster/medium/tt7927936/img",
+      background: "https://images.metahub.space/background/medium/tt7927936/img",
+      genres: ["دراما", "تاريخي"],
+      imdbRating: "7.6",
+      releaseInfo: "2018",
+      description: "يرصد المسلسل التحولات الاجتماعية والثقافية في المجتمع السعودي بمدينة الرياض منذ سبعينيات القرن الماضي من خلال عائلة الطيان."
+    },
+    {
+      id: "tt5645432",
+      type: "series",
+      name: "سيلفي",
+      poster: "https://images.metahub.space/poster/medium/tt5645432/img",
+      background: "https://images.metahub.space/background/medium/tt5645432/img",
+      genres: ["كوميديا", "دراما"],
+      imdbRating: "8.1",
+      releaseInfo: "2015",
+      description: "حلقات منفصلة متصلة تناقش أبرز القضايا الاجتماعية والظواهر المعاصرة في المجتمع الخليجي والعربي بأسلوب كوميدي ساخر وجريء."
+    },
+    {
+      id: "tt31015642",
+      type: "series",
+      name: "خيوط المعازيب",
+      poster: "https://images.metahub.space/poster/medium/tt31015642/img",
+      background: "https://images.metahub.space/background/medium/tt31015642/img",
+      genres: ["تاريخي", "دراما"],
+      imdbRating: "9.0",
+      releaseInfo: "2024",
+      description: "في ستينيات القرن الماضي بمحافظة الأحساء، تتشابك قصص صناع البشوت الحساوية وسط صراعات إنسانية واجتماعية مؤثرة."
+    },
+    {
+      id: "tt13109952",
+      type: "series",
+      name: "محامي الشيطان",
+      poster: "https://images.metahub.space/poster/medium/tt13109952/img",
+      background: "https://images.metahub.space/background/medium/tt13109952/img",
+      genres: ["جريمة", "غموض", "تشويق وإثارة"],
+      imdbRating: "7.9",
+      releaseInfo: "2023",
+      description: "يتولى محامٍ بارع الدفاع عن لاعب كرة قدم متهم بقتل زوجته، ليجد نفسه وسط شبكة معقدة من الأسرار والمؤامرات."
+    },
+    {
+      id: "tt19896150",
+      type: "series",
+      name: "من شارع الهرم إلى...",
+      poster: "https://images.metahub.space/poster/medium/tt19896150/img",
+      background: "https://images.metahub.space/background/medium/tt19896150/img",
+      genres: ["دراما", "كوميديا"],
+      imdbRating: "7.1",
+      releaseInfo: "2022",
+      description: "تضطر راقصة استعراضية للبقاء في منزل عائلة خليجية عريقة بعد حفل زفاف، مما يفجر سلسلة من المواقف والصراعات العائلية غير المتوقعة."
+    },
+    {
+      id: "tt14500214",
+      type: "series",
+      name: "اختطاف",
+      poster: "https://images.metahub.space/poster/medium/tt14500214/img",
+      background: "https://images.metahub.space/background/medium/tt14500214/img",
+      genres: ["تشويق وإثارة", "دراما", "غموض"],
+      imdbRating: "7.5",
+      releaseInfo: "2021",
+      description: "تتعرض الطفلة لينا للاختطاف وتحتجز في قبو معزول لسنوات طويلة، بينما تستمر عائلتها وشقيقتها التوأم في رحلة البحث عنها."
+    },
+    {
+      id: "tt10293938",
+      type: "series",
+      name: "دفعة القاهرة",
+      poster: "https://images.metahub.space/poster/medium/tt10293938/img",
+      background: "https://images.metahub.space/background/medium/tt10293938/img",
+      genres: ["دراما", "تاريخي", "رومانسي"],
+      imdbRating: "8.0",
+      releaseInfo: "2019",
+      description: "قصة أول دفعة من الطالبات والطلاب الخليجيين المبتعثين للدراسة في جامعة القاهرة عام 1956 وما واجهوه من تحديات وتجارب حياتية."
+    }
+  ]
+};
 
 function parseSizeBytes(sizeStr) {
   if (!sizeStr) return 0;
@@ -569,9 +819,9 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         id: "org.sovereign.arabic.movies.series",
-        version: "12.0.0",
+        version: "13.0.0",
         name: "Movies & Series",
-        description: "المركز السيادي للأفلام والمسلسلات | تعريب فوري للقصة والعناوين مع تصنيف الدقات والترند",
+        description: "المركز السيادي للأفلام والمسلسلات | تعريب فوري للقصة والعناوين مع المسلسلات العربية وتصنيف الدقات",
         resources: ["stream", "subtitles", "catalog", "meta"],
         types: ["movie", "series"],
         idPrefixes: ["tt", "kitsu"],
@@ -585,6 +835,18 @@ export default async function handler(req, res) {
             type: "series",
             id: "top10_region_series",
             name: `Series // أفضل 10 في ${countryName}`
+          },
+          {
+            type: "series",
+            id: "arabic_series_top",
+            name: "Series // مسلسلات عربية",
+            extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
+          },
+          {
+            type: "series",
+            id: "arabic_gulf_series",
+            name: "Series // مسلسلات خليجية ورمضانية",
+            extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
           },
           {
             type: "movie",
@@ -632,7 +894,7 @@ export default async function handler(req, res) {
     }
 
     // -----------------------------------------------------------------
-    // ج. مسار الكتالوجات (مع تعريب فوري للقصة والتصنيفات في الواجهة الخارجية)
+    // ج. مسار الكتالوجات (مع تعريب شامل لكل القصص ودعم تصنيفي المسلسلات العربية)
     // -----------------------------------------------------------------
     if (path.includes("/catalog/")) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -645,9 +907,44 @@ export default async function handler(req, res) {
       const { countryCode } = getUserRegionInfo(req);
       const daySeed = Math.floor(Date.now() / (1000 * 60 * 60 * 12));
 
-      const cacheKey = `cat_ar_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
+      const cacheKey = `cat_ar_v13_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
       const cachedCat = getFromCache(cacheKey);
       if (cachedCat) return res.status(200).json(cachedCat);
+
+      // معالجة تصنيفي المسلسلات العربية والخليجية المخصصين
+      if (catalogId === "arabic_series_top" || catalogId === "arabic_gulf_series") {
+        const baseCurated = catalogId === "arabic_gulf_series"
+          ? [...ARABIC_SERIES_CURATED.gulf, ...ARABIC_SERIES_CURATED.general]
+          : [...ARABIC_SERIES_CURATED.general, ...ARABIC_SERIES_CURATED.gulf];
+
+        // دمج نتائج إضافية من البحث العربي في Cinemeta لزيادة المكتبة العربية
+        const searchTerms = catalogId === "arabic_gulf_series" ? ["Saudi", "Kuwait", "Rashash"] : ["Egypt", "Ramadan", "Arabic"];
+        const searchResponses = await Promise.all(
+          searchTerms.map(term => safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/catalog/series/top/search=${encodeURIComponent(term)}.json`))
+        );
+
+        const combinedArabic = [...baseCurated];
+        const seenArIds = new Set(combinedArabic.map(item => item.id));
+
+        for (const resObj of searchResponses) {
+          if (resObj && Array.isArray(resObj.metas)) {
+            for (const m of resObj.metas) {
+              if (m && m.id && !seenArIds.has(m.id)) {
+                seenArIds.add(m.id);
+                combinedArabic.push(m);
+              }
+            }
+          }
+        }
+
+        const localizedArabic = await Promise.all(
+          combinedArabic.slice(0, 35).map(item => localizeMetaItem(item))
+        );
+
+        const arPayload = { metas: localizedArabic };
+        saveToCache(cacheKey, arPayload);
+        return res.status(200).json(arPayload);
+      }
 
       const extraSuffix = extraPart ? `/${extraPart}.json` : ".json";
       // الأولوية لكتالوج TMDB المعرب ثم Cinemeta مع التعريب الفوري
@@ -702,11 +999,11 @@ export default async function handler(req, res) {
         }));
       }
 
-      // تعريب القصص (Descriptions) لأول 20 عنصر في الكتالوج بشكل متوازٍ وسريع حتى تظهر بالعربية في الواجهة الرئيسية
-      const topBatch = cleanMetas.slice(0, 20);
-      const restBatch = cleanMetas.slice(20);
-      const localizedTopBatch = await Promise.all(topBatch.map(item => localizeMetaItem(item)));
-      const finalMetas = [...localizedTopBatch, ...restBatch];
+      // تعريب جميع القصص المعروضة في الكتالوج (تعبئة description و overview و synopsis بالعربية)
+      const batchToLocalize = cleanMetas.slice(0, 40);
+      const remainingItems = cleanMetas.slice(40);
+      const localizedBatch = await Promise.all(batchToLocalize.map(item => localizeMetaItem(item)));
+      const finalMetas = [...localizedBatch, ...remainingItems];
 
       const payload = { metas: finalMetas };
       if (finalMetas.length > 0) saveToCache(cacheKey, payload);
