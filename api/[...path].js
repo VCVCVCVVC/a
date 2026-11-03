@@ -179,8 +179,9 @@ const GENRE_AR_MAP = {
   Romance: "رومانسي",
   "Sci-Fi": "خيال علمي",
   "Science Fiction": "خيال علمي",
+  Suspense: "تشويق",
   Sport: "رياضي",
-  Thriller: "تشويق وإثارة",
+  Thriller: "إثارة",
   War: "حرب",
   Western: "غرب أمريكي",
   "Action & Adventure": "حركة ومغامرة",
@@ -192,60 +193,82 @@ function localizeGenres(genres) {
   return genres.map(g => GENRE_AR_MAP[g] || g);
 }
 
-// دالة تعريب فوري للنصوص الإنجليزية (القصة والعنوان) لتظهر بالعربية في الواجهة الرئيسية قبل الدخول
+// فحص ما إذا كان النص عربياً بالفعل
+function isTextArabic(text) {
+  if (!text || typeof text !== "string") return false;
+  const arabicChars = text.match(/[\u0600-\u06FF]/g);
+  return Boolean(arabicChars && arabicChars.length >= 6);
+}
+
+// دالة ترجمة نص مفرد مع 3 محركات متتالية (GTX -> Clients5 -> MyMemory) وعدم تخزين النص إلا إذا تعرب فعلياً
 async function translateToArabic(text) {
   if (!text || typeof text !== "string") return text;
   const cleanText = text.trim();
-  if (!cleanText) return cleanText;
+  if (!cleanText || isTextArabic(cleanText)) return cleanText;
 
-  // فحص وجود نسبة كافية من الحروف العربية (أكثر من 4 حروف عربية متفرقة)
-  const arabicMatches = cleanText.match(/[\u0600-\u06FF]/g);
-  if (arabicMatches && arabicMatches.length > 5) return cleanText;
-
-  const cacheKey = `tr_ar_v2_${cleanText.slice(0, 140)}`;
+  const cacheKey = `tr_ar_v14_${cleanText.slice(0, 160)}`;
   const cached = getFromCache(cacheKey, true);
-  if (cached) return cached;
+  if (cached && isTextArabic(cached)) return cached;
 
-  // المحرك الأول: Google Translate GTX السريع (بدون قفل Health Check)
+  // المحرك الأول: Google GTX
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ar&dt=t&q=${encodeURIComponent(cleanText)}`;
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q=${encodeURIComponent(cleanText)}`;
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": "Mozilla/5.0" }
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
     });
     clearTimeout(timer);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data) && Array.isArray(data[0])) {
         const translated = data[0].map(part => (part && part[0]) ? part[0] : "").join("").trim();
-        if (translated && /[\u0600-\u06FF]/.test(translated)) {
+        if (isTextArabic(translated)) {
           saveToCache(cacheKey, translated);
           return translated;
         }
       }
     }
   } catch {
-    // الانتقال للمحرك الاحتياطي
+    // الانتقال للمحرك الثاني
   }
 
-  // المحرك الاحتياطي: Google Dictionary / Clients5 API
+  // المحرك الثاني: Google Clients5
   try {
     const controller2 = new AbortController();
-    const timer2 = setTimeout(() => controller2.abort(), 3000);
-    const url2 = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=ar&q=${encodeURIComponent(cleanText)}`;
+    const timer2 = setTimeout(() => controller2.abort(), 3500);
+    const url2 = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=en&tl=ar&q=${encodeURIComponent(cleanText)}`;
     const res2 = await fetch(url2, {
       signal: controller2.signal,
-      headers: { "User-Agent": "Mozilla/5.0" }
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
     });
     clearTimeout(timer2);
     if (res2.ok) {
       const data2 = await res2.json();
       const candidate = Array.isArray(data2) ? (Array.isArray(data2[0]) ? data2[0][0] : data2[0]) : null;
-      if (typeof candidate === "string" && /[\u0600-\u06FF]/.test(candidate)) {
+      if (typeof candidate === "string" && isTextArabic(candidate)) {
         saveToCache(cacheKey, candidate.trim());
         return candidate.trim();
+      }
+    }
+  } catch {
+    // الانتقال للمحرك الثالث
+  }
+
+  // المحرك الثالث الاحتياطي: MyMemory API
+  try {
+    const controller3 = new AbortController();
+    const timer3 = setTimeout(() => controller3.abort(), 3500);
+    const url3 = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanText.slice(0, 480))}&langpair=en|ar`;
+    const res3 = await fetch(url3, { signal: controller3.signal });
+    clearTimeout(timer3);
+    if (res3.ok) {
+      const data3 = await res3.json();
+      const candidate3 = data3?.responseData?.translatedText;
+      if (typeof candidate3 === "string" && isTextArabic(candidate3)) {
+        saveToCache(cacheKey, candidate3.trim());
+        return candidate3.trim();
       }
     }
   } catch {
@@ -255,7 +278,131 @@ async function translateToArabic(text) {
   return cleanText;
 }
 
-// تعريب كائن الفيلم أو المسلسل بالكامل لجميع الحقول التي تقرأها الواجهة الخارجية (description / overview / synopsis)
+// مترجم الدفعات الموحد (Batch Translator): يترجم عشرات القصص في طلب واحد لمنع حظر Rate-Limit نهائياً
+async function batchTranslatePlotsToArabic(plotsArray) {
+  if (!Array.isArray(plotsArray) || plotsArray.length === 0) return plotsArray;
+
+  const results = [...plotsArray];
+  const pendingIndices = [];
+  const pendingTexts = [];
+
+  for (let i = 0; i < plotsArray.length; i++) {
+    const txt = (plotsArray[i] || "").trim();
+    if (!txt || isTextArabic(txt)) continue;
+
+    const cacheKey = `tr_ar_v14_${txt.slice(0, 160)}`;
+    const cached = getFromCache(cacheKey, true);
+    if (cached && isTextArabic(cached)) {
+      results[i] = cached;
+    } else {
+      pendingIndices.push(i);
+      pendingTexts.push(txt.replace(/\n+/g, " "));
+    }
+  }
+
+  if (pendingTexts.length === 0) return results;
+
+  // تقسيم النصوص إلى مجموعات (كل 8 قصص في طلب واحد فقط مفصولة بأسطر) لضمان سرعة فائقة وعدم الحظر
+  const CHUNK_SIZE = 8;
+  for (let start = 0; start < pendingTexts.length; start += CHUNK_SIZE) {
+    const chunkTexts = pendingTexts.slice(start, start + CHUNK_SIZE);
+    const chunkIndices = pendingIndices.slice(start, start + CHUNK_SIZE);
+    const joinedPayload = chunkTexts.join("\n\n");
+
+    let chunkTranslatedSuccess = false;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q=${encodeURIComponent(joinedPayload)}`;
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+      });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && Array.isArray(data[0])) {
+          const fullArabicText = data[0].map(part => (part && part[0]) ? part[0] : "").join("");
+          const splitParts = fullArabicText.split(/\n\s*\n/);
+
+          if (splitParts.length === chunkTexts.length) {
+            chunkTranslatedSuccess = true;
+            for (let j = 0; j < chunkTexts.length; j++) {
+              const arText = splitParts[j].trim();
+              const originalIdx = chunkIndices[j];
+              if (isTextArabic(arText)) {
+                results[originalIdx] = arText;
+                saveToCache(`tr_ar_v14_${chunkTexts[j].slice(0, 160)}`, arText);
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // في حال فشل الدفعة ننتقل للترجمة المفردة الاحتياطية
+    }
+
+    if (!chunkTranslatedSuccess) {
+      const fallbackTranslations = await Promise.all(
+        chunkTexts.map(t => translateToArabic(t))
+      );
+      for (let j = 0; j < chunkTexts.length; j++) {
+        results[chunkIndices[j]] = fallbackTranslations[j];
+      }
+    }
+  }
+
+  return results;
+}
+
+// تعريب قائمة عناصر الكتالوج دفعة واحدة مع جلب الوصف المفقود وتعريب كافة الحقول
+async function localizeCatalogList(items, type = "movie") {
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  // 1. تجهيز العناصر وتطهير الإيموجيات وتعريب التصنيفات
+  const prepared = items.map(item => ({
+    ...item,
+    name: stripAllEmojis(item.name || ""),
+    genres: localizeGenres(item.genres),
+    genre: localizeGenres(item.genre)
+  }));
+
+  // 2. إذا كان العنصر من أوائل عناصر البنر الرئيسي ولا يحتوي على قصة في الكتالوج، نجلب قصته من TMDB العربي أو Cinemeta
+  const heroItemsCount = Math.min(prepared.length, 15);
+  await Promise.all(
+    prepared.slice(0, heroItemsCount).map(async (item) => {
+      const existingPlot = item.description || item.overview || item.synopsis || "";
+      if (!existingPlot && item.id && item.id.startsWith("tt")) {
+        const arMeta = await safeFetchJson(`${UPSTREAM_ADDONS.tmdbAddon}/meta/${type}/${item.id}.json`, {}, 2500);
+        const arDesc = arMeta?.meta?.description || arMeta?.meta?.overview;
+        if (arDesc) {
+          item.description = arDesc;
+        } else {
+          const enMeta = await safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/meta/${type}/${item.id}.json`, {}, 2500);
+          if (enMeta?.meta?.description) item.description = enMeta.meta.description;
+        }
+      }
+    })
+  );
+
+  // 3. جمع كل القصص وترجمتها بنظام الدفعات الموحد المضمون 100%
+  const rawPlots = prepared.map(item => item.description || item.overview || item.synopsis || "");
+  const translatedPlots = await batchTranslatePlotsToArabic(rawPlots);
+
+  for (let i = 0; i < prepared.length; i++) {
+    const arPlot = translatedPlots[i];
+    if (arPlot) {
+      prepared[i].description = arPlot;
+      prepared[i].overview = arPlot;
+      prepared[i].synopsis = arPlot;
+    }
+  }
+
+  return prepared;
+}
+
+// تعريب كائن الفيلم أو المسلسل المفرد بالكامل لجميع الحقول التي تقرأها الواجهة الخارجية والداخلية
 async function localizeMetaItem(item) {
   if (!item) return item;
   const localized = {
@@ -907,7 +1054,7 @@ export default async function handler(req, res) {
       const { countryCode } = getUserRegionInfo(req);
       const daySeed = Math.floor(Date.now() / (1000 * 60 * 60 * 12));
 
-      const cacheKey = `cat_ar_v13_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
+      const cacheKey = `cat_ar_v14_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
       const cachedCat = getFromCache(cacheKey);
       if (cachedCat) return res.status(200).json(cachedCat);
 
@@ -937,9 +1084,7 @@ export default async function handler(req, res) {
           }
         }
 
-        const localizedArabic = await Promise.all(
-          combinedArabic.slice(0, 35).map(item => localizeMetaItem(item))
-        );
+        const localizedArabic = await localizeCatalogList(combinedArabic.slice(0, 35), "series");
 
         const arPayload = { metas: localizedArabic };
         saveToCache(cacheKey, arPayload);
@@ -947,39 +1092,63 @@ export default async function handler(req, res) {
       }
 
       const extraSuffix = extraPart ? `/${extraPart}.json` : ".json";
-      // الأولوية لكتالوج TMDB المعرب ثم Cinemeta مع التعريب الفوري
-      let primaryUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.top${extraSuffix}`;
-      let fallbackUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${extraSuffix}`;
+      // جلب متوازي من TMDB العربي و Cinemeta ثم دمج القصة العربية من TMDB مع البيانات الكاملة من Cinemeta
+      let tmdbUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.top${extraSuffix}`;
+      let cinemetaUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${extraSuffix}`;
 
       if (catalogId === "trending_daily_movies" || catalogId === "trending_daily_series") {
-        primaryUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.trending${extraSuffix}`;
-        fallbackUrl = `${UPSTREAM_ADDONS.tmdbFallback}/catalog/${type}/tmdb.trending${extraSuffix}`;
+        tmdbUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.trending${extraSuffix}`;
       } else if (catalogId === "top10_region_movies" || catalogId === "top10_region_series") {
-        primaryUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.trending.json`;
-        fallbackUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top.json`;
+        tmdbUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.trending.json`;
+        cinemetaUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top.json`;
       }
 
-      let data = await safeFetchJson(primaryUrl);
-      if (!data || !Array.isArray(data.metas) || data.metas.length === 0) {
-        data = await safeFetchJson(fallbackUrl);
+      const [tmdbData, cinemetaData] = await Promise.all([
+        safeFetchJson(tmdbUrl),
+        safeFetchJson(cinemetaUrl)
+      ]);
+
+      // بناء خريطة للقصص العربية الجاهزة من TMDB لتطعيم عناصر Cinemeta بها فوراً
+      const arabicPlotsById = new Map();
+      if (tmdbData && Array.isArray(tmdbData.metas)) {
+        for (const tm of tmdbData.metas) {
+          const plot = tm?.description || tm?.overview || "";
+          if (tm?.id && isTextArabic(plot)) {
+            arabicPlotsById.set(tm.id, plot);
+          }
+        }
       }
-      if (!data || !Array.isArray(data.metas) || data.metas.length === 0) {
-        data = await safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${extraSuffix}`);
+
+      const sourceList = (tmdbData && Array.isArray(tmdbData.metas) && tmdbData.metas.length > 0)
+        ? tmdbData.metas
+        : (cinemetaData && Array.isArray(cinemetaData.metas) ? cinemetaData.metas : []);
+
+      // خريطة الأوصاف الإنجليزية من Cinemeta في حال كان عنصر TMDB بلا وصف
+      const englishPlotsById = new Map();
+      if (cinemetaData && Array.isArray(cinemetaData.metas)) {
+        for (const cm of cinemetaData.metas) {
+          const plot = cm?.description || cm?.overview || "";
+          if (cm?.id && plot) {
+            englishPlotsById.set(cm.id, plot);
+          }
+        }
       }
 
       let cleanMetas = [];
       const seenIds = new Set();
 
-      if (data && Array.isArray(data.metas)) {
-        for (const m of data.metas) {
-          if (m && m.id && !seenIds.has(m.id)) {
-            seenIds.add(m.id);
-            cleanMetas.push({
-              ...m,
-              name: stripAllEmojis(m.name || ""),
-              genres: localizeGenres(m.genres)
-            });
-          }
+      for (const m of sourceList) {
+        if (m && m.id && !seenIds.has(m.id)) {
+          seenIds.add(m.id);
+          const bestPlot = arabicPlotsById.get(m.id) || m.description || m.overview || englishPlotsById.get(m.id) || "";
+          cleanMetas.push({
+            ...m,
+            name: stripAllEmojis(m.name || ""),
+            description: bestPlot,
+            overview: bestPlot,
+            synopsis: bestPlot,
+            genres: localizeGenres(m.genres)
+          });
         }
       }
 
@@ -999,10 +1168,10 @@ export default async function handler(req, res) {
         }));
       }
 
-      // تعريب جميع القصص المعروضة في الكتالوج (تعبئة description و overview و synopsis بالعربية)
-      const batchToLocalize = cleanMetas.slice(0, 40);
-      const remainingItems = cleanMetas.slice(40);
-      const localizedBatch = await Promise.all(batchToLocalize.map(item => localizeMetaItem(item)));
+      // تعريب جميع القصص دفعة واحدة عبر Batch Translator الموحد لمنع بقاء أي قصة بالإنجليزية
+      const batchToLocalize = cleanMetas.slice(0, 45);
+      const remainingItems = cleanMetas.slice(45);
+      const localizedBatch = await localizeCatalogList(batchToLocalize, type);
       const finalMetas = [...localizedBatch, ...remainingItems];
 
       const payload = { metas: finalMetas };
