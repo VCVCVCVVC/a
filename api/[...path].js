@@ -110,17 +110,18 @@ function cleanAndFormatStream(stream) {
     // 2. نوع النسخة والمصدر
     let ripType = "";
     let ripBonus = 0;
-    if (/\bRemux\b/i.test(full)) { ripType = "REMUX"; ripBonus = 500; }
-    else if (/\b(BDRip|BRRip|BluRay)\b/i.test(full)) { ripType = "BLURAY"; ripBonus = 300; }
-    else if (/\b(WEB-DL|WEBRip|WEB)\b/i.test(full)) { ripType = "WEB-DL"; ripBonus = 200; }
-    else if (/\bHDTV\b/i.test(full)) { ripType = "HDTV"; ripBonus = 50; }
+    if (/\bRemux\b/i.test(full)) { ripType = "REMUX"; ripBonus = 600; }
+    else if (/\b(BDRip|BRRip|BluRay)\b/i.test(full)) { ripType = "BLURAY"; ripBonus = 400; }
+    else if (/\b(WEB-DL|WEBRip|WEB)\b/i.test(full)) { ripType = "WEB-DL"; ripBonus = 300; }
+    else if (/\bHDTV\b/i.test(full)) { ripType = "HDTV"; ripBonus = 100; }
 
-    // 3. تقنيات الصورة والمدى الديناميكي
+    // 3. تقنيات الصورة والمدى الديناميكي العالي
     const visual = [];
-    if (/\b(DV|Dolby[\s.-]?Vision)\b/i.test(full)) visual.push("DV");
+    if (/\b(DV|Dolby[\s.-]?Vision)\b/i.test(full)) visual.push("DOLBY VISION");
     if (/\bHDR10\+/i.test(full)) visual.push("HDR10+");
     else if (/\bHDR\b/i.test(full)) visual.push("HDR");
     if (/\b(10bit|10-bit)\b/i.test(full)) visual.push("10Bit");
+    if (/\bIMAX\b/i.test(full)) visual.push("IMAX");
 
     // 4. ترميز وضغط الفيديو
     let codec = "";
@@ -128,51 +129,77 @@ function cleanAndFormatStream(stream) {
     else if (/\b(AVC|x264|H\.?264)\b/i.test(full)) codec = "x264";
     else if (/\bAV1\b/i.test(full)) codec = "AV1";
 
-    // 5. تقنيات الصوت المحيطي
+    // 5. تقنيات الصوت المحيطي والقنوات
     const audio = [];
-    if (/\bAtmos\b/i.test(full)) audio.push("Atmos");
-    if (/\bTrueHD\b/i.test(full)) audio.push("TrueHD");
-    else if (/\b(DTS-HD|DTS)\b/i.test(full)) audio.push("DTS");
-    else if (/\b(DD\+|E-AC-?3|DDP)\b/i.test(full)) audio.push("DD+");
+    if (/\bAtmos\b/i.test(full)) audio.push("ATMOS");
+    if (/\bTrueHD\b/i.test(full)) audio.push("TRUEHD");
+    else if (/\b(DTS-HD|DTS)\b/i.test(full)) audio.push("DTS-HD");
+    else if (/\b(DD\+|E-AC-?3|DDP)\b/i.test(full)) audio.push("DD+ 5.1");
+    else if (/\b(5\.1)\b/.test(full)) audio.push("5.1");
+    else if (/\b(7\.1)\b/.test(full)) audio.push("7.1");
 
-    const channelMatch = full.match(/\b(7\.1|5\.1|2\.0)\b/);
-    if (channelMatch) audio.push(channelMatch[1]);
-
-    // 6. حجم الملف الفعلي
-    const sizeMatch = originalTitle.match(/([0-9]+(?:\.[0-9]+)?\s*(?:GB|MB|GiB|MiB))/i);
-    const sizeStr = sizeMatch ? sizeMatch[1].toUpperCase() : null;
-    const sizeBytes = parseSizeBytes(sizeStr);
-
-    // 7. عدد الـ Seeders
-    const seedersMatch = originalTitle.match(/(?:👤|👥|\bS:?\s*)(\d+)/i);
-    const seeders = seedersMatch ? parseInt(seedersMatch[1], 10) : 0;
-
-    // 8. التخزين السحابي الفوري
-    const isCached = full.includes("⚡") || full.includes("[TB+]") || full.toLowerCase().includes("cached");
-
-    // 9. فريق الإصدار
-    let releaseGroup = "";
-    const groupMatch = full.match(/-([a-zA-Z0-9]+)(?:\[.*?\])?(?:\.mkv|\.mp4)?$/m);
-    if (groupMatch && groupMatch[1].length < 15) {
-      releaseGroup = groupMatch[1];
+    // 6. استخراج الحجم الفعلي مع فرض المحاذاة اليسرى LTR لمنع تشوه الأرقام
+    const sizeMatch = originalTitle.match(/([0-9]+(?:\.[0-9]+)?\s*(?:GB|MB|GiB|MiB))/i) || 
+                      originalName.match(/([0-9]+(?:\.[0-9]+)?\s*(?:GB|MB|GiB|MiB))/i);
+    let sizeStr = null;
+    let sizeBytes = 0;
+    if (sizeMatch) {
+      const numPart = sizeMatch[1].match(/[0-9]+(?:\.[0-9]+)?/)[0];
+      const unitPart = sizeMatch[1].match(/(?:GB|MB|GiB|MiB)/i)[0].toUpperCase();
+      sizeStr = `\u200E${numPart} ${unitPart}\u200E`;
+      sizeBytes = parseSizeBytes(sizeMatch[1]);
     }
 
-    // بناء البصريات الفخمة
-    const badgeHeader = [resLabel, ripType, visual.join("/"), codec].filter(Boolean).join("  •  ");
-    const metaDetails = [
-      sizeStr ? `📦 ${sizeStr}` : null,
-      audio.length ? `🔊 ${audio.join(" ")}` : null,
-      seeders > 0 ? `👥 ${seeders}` : null,
-      releaseGroup ? `🏷️ ${releaseGroup}` : null
-    ].filter(Boolean).join("   │   ");
+    // 7. عدد الـ Seeders الحقيقي مع عزل LTR
+    const seedersMatch = originalTitle.match(/(?:👤|👥|\bS:?\s*)(\d+)/i);
+    const seedersCount = seedersMatch ? parseInt(seedersMatch[1], 10) : 0;
+    const seedersBadge = seedersCount > 0 ? `\u200E👥 ${seedersCount}\u200E` : null;
 
-    // احتساب الدرجة الذكية
-    const finalScore = (isCached ? 20000 : 0) + resScore + ripBonus + (seeders * 0.2);
+    // 8. التخزين السحابي الفوري
+    const isCached = full.includes("⚡") || full.includes("[TB+]") || full.toLowerCase().includes("torbox") || full.toLowerCase().includes("cached");
+
+    // 9. فريق الإصدار ومصدر التورنت
+    let releaseGroup = "";
+    const groupMatch = full.match(/-([a-zA-Z0-9]+)(?:\[.*?\])?(?:\.mkv|\.mp4)?$/m) ||
+                       originalTitle.match(/⚙️\s*([a-zA-Z0-9]+)|RARBG|YTS|PSA|TGx|FLUX|NTb|CMRG|QxR/i);
+    if (groupMatch) {
+      releaseGroup = (groupMatch[1] || groupMatch[0]).replace(/⚙️/g, "").trim();
+    }
+
+    // ==========================================
+    // صياغة التصميم الاحترافي الفخم لبطاقة Stremio
+    // ==========================================
+    // السطر العلوي (Title Bar): شارة التخزين السحابي أولاً متبوعة بالجودة والتقنيات
+    const headerElements = [
+      resLabel,
+      ripType,
+      visual.length > 0 ? visual.join("/") : null,
+      codec
+    ].filter(Boolean);
+
+    const providerTag = isCached ? "[ ⚡ TORBOX ]" : "[ P2P ]";
+    const titleBar = `${headerElements.join("  •  ")}  ${providerTag}`;
+
+    // السطر الثاني (Info Row): تنسيق مقفل باتجاه LTR لضمان عدم انعكاس الأرقام والرموز نهائياً
+    const infoPills = [
+      sizeStr ? `📦 ${sizeStr}` : null,
+      audio.length > 0 ? `🔊 \u200E${audio.join(" ")}\u200E` : null,
+      seedersBadge,
+      releaseGroup ? `🏷️ \u200E${releaseGroup}\u200E` : null
+    ].filter(Boolean);
+
+    const separator = "────────────────────────────────────────";
+    const subLine = infoPills.length > 0 
+      ? infoPills.join("   │   ")
+      : "\u200E⚡ فائق السرعة - جاهز للمشاهدة المباشرة\u200E";
+
+    // احتساب سكور الترتيب الدقيق
+    const finalScore = (isCached ? 25000 : 0) + resScore + ripBonus + (seedersCount * 0.3) + (sizeBytes / (1024 * 1024 * 1024) * 5);
 
     return {
       ...stream,
-      name: isCached ? `[TORBOX ⚡]  ${badgeHeader}` : `[P2P]  ${badgeHeader}`,
-      title: `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${metaDetails || "تشغيل فوري عالي السرعة"}`,
+      name: titleBar,
+      title: `${separator}\n${subLine}`,
       _score: finalScore,
       _hash: stream.infoHash || stream.url || originalTitle
     };
@@ -278,7 +305,7 @@ export default async function handler(req, res) {
     if (path === "/manifest.json" || path === "/api/index" || path === "/api") {
       return res.status(200).json({
         id: "org.allinone.torrentio.master.ultra",
-        version: "5.0.0",
+        version: "5.5.0",
         name: "Stremio Master Hub Ultra Pro",
         description: "مجمع شامل يدمج تلقائياً: تدفقات TorBox السحابية، كتالوجات منصات البث (Netflix & Disney)، ترجمات SubDL و OpenSubtitles العربية، ومكتبات Cinemeta & Public Domain",
         resources: ["stream", "subtitles", "catalog", "meta"],
@@ -303,6 +330,11 @@ export default async function handler(req, res) {
             type: "series",
             id: "cyberflix_apple_series",
             name: "🍏 مسلسلات Apple TV+"
+          },
+          {
+            type: "movie",
+            id: "cyberflix_disney_movies",
+            name: "✨ أفلام Disney+ Originals"
           },
           {
             type: "movie",
@@ -334,9 +366,12 @@ export default async function handler(req, res) {
         }
       }
 
-      // 2. كتالوجات منصات البث (CyberFlix Proxy)
+      // 2. كتالوجات منصات البث (CyberFlix Proxy: Netflix, Apple, Disney)
       if (catalogId.startsWith("cyberflix_")) {
-        const cfPlatform = catalogId.includes("netflix") ? "netflix" : "apple";
+        let cfPlatform = "netflix";
+        if (catalogId.includes("apple")) cfPlatform = "apple";
+        else if (catalogId.includes("disney")) cfPlatform = "disney";
+        
         const cfData = await safeFetchJson(`${UPSTREAM_ADDONS.cyberflix}/catalog/${type}/${cfPlatform}.json`);
         if (cfData && Array.isArray(cfData.metas)) {
           saveToCache(cacheKey, cfData);
