@@ -678,9 +678,8 @@ function renderConfigPage(host) {
   <h2>1. الإضافة الأساسية (الكتالوجات + التفاصيل + الترجمة)</h2>
   <a class="main" href="stremio://${host}/manifest.json">تثبيت الإضافة الأساسية</a>
 
-  <h2>2. البث (مطلوب: ثبّت واحداً على الأقل، وإلا يظهر «التشغيل غير متاح»)</h2>
-  <a class="main" href="stremio://${host}/all/manifest.json">تثبيت السيرفرات (كل الجودات في تبويب واحد)</a>
-  <p style="margin-top:14px">أو ثبّت تبويبات منفصلة تظهر بجانب «الكل» (اختياري):</p>
+  <h2>2. تبويبات بث إضافية (اختياري)</h2>
+  <p>الإضافة الأساسية تتضمن البث الآن، فلا حاجة لتثبيت شيء آخر. هذه التبويبات لعرض الروابط مفلترة بالدقة أو اللغة فقط:</p>
   <div class="grid">
     ${tile("/arabic", "عربي", "صوت عربي فقط", true)}
     ${tile("/4k", "4K", "أعلى جودة", true)}
@@ -820,7 +819,7 @@ function getStreamList(type, id, streamSubPath) {
   const job = (async () => {
     // المصدر الرئيسي (Torrentio/Torbox) ومعه WebStreamr يُنتظران حتى 4.2 ثانية، والباقي 2.5 ثانية فقط
     const [torrentioData, webstreamrData, tpbData, ytsData, eztvData, publicDomainData] = await Promise.all([
-      withDeadline(safeFetchJson(`${UPSTREAM_URL}${streamSubPath}`), 4200),
+      withDeadline(safeFetchJson(`${UPSTREAM_URL}${streamSubPath}`, {}, 7000), 7000),
       withDeadline(safeFetchJson(`${UPSTREAM_ADDONS.webstreamr}/stream/${type}/${id}.json`), 4200),
       withDeadline(safeFetchJson(`${UPSTREAM_ADDONS.tpbPlus}/stream/${type}/${id}.json`), 2500),
       type === "movie" ? withDeadline(safeFetchJson(`${UPSTREAM_ADDONS.yts}/stream/${type}/${id}.json`), 2500) : null,
@@ -904,7 +903,7 @@ export default async function handler(req, res) {
         const label = arabicOnly ? "عربي" : allTab ? "السيرفرات" : resolutionFilter;
         return res.status(200).json({
           id: `org.sovereign.arabic.res.${tabKey.toLowerCase()}`,
-          version: "16.0.0",
+          version: "16.1.0",
           name: label,
           description: arabicOnly ? "روابط بصوت عربي فقط" : allTab ? "كل الروابط مرتبة: الأفضل أولاً مع لغة الصوت" : `روابط بدقة ${label} فقط`,
           resources: ["stream"],
@@ -917,10 +916,10 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         id: "org.sovereign.arabic.movies.series",
-        version: "16.0.0",
+        version: "16.1.0",
         name: "المركز السيادي",
         description: "المركز السيادي للأفلام والمسلسلات - تعريب فوري للقصة والحلقات والتصنيفات مع المسلسلات العربية وتصنيف الدقات",
-        resources: ["catalog", "meta", "subtitles"],
+        resources: ["catalog", "meta", "subtitles", "stream"],
         types: ["movie", "series"],
         idPrefixes: ["tt", "kitsu"],
         catalogs: [
@@ -954,7 +953,7 @@ export default async function handler(req, res) {
       res.setHeader("Cache-Control", "no-store");
       const providers = {};
       for (const [h, st] of healthMetrics) providers[h] = { fails: st.fails, healthy: !(st.fails >= 3 && Date.now() - st.lastFail < 60000) };
-      return res.status(200).json({ status: "ok", version: "16.0.0", cacheEntries: memoryCache.size, providers });
+      return res.status(200).json({ status: "ok", version: "16.1.0", cacheEntries: memoryCache.size, providers });
     }
 
     if (path === "" || path === "/") {
@@ -1146,7 +1145,7 @@ export default async function handler(req, res) {
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     return res.status(200).json({
       status: "نشط",
-      name: "Movies & Series - المركز السيادي V16.0"
+      name: "Movies & Series - المركز السيادي V16.1"
     });
 
   } catch {
