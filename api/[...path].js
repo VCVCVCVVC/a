@@ -44,7 +44,8 @@ function getFromCache(key, allowStale = false) {
     const age = Date.now() - item.time;
     if (age < CACHE_TTL) return item.data;
     if (allowStale && age < STALE_TTL) return item.data;
-    memoryCache.delete(key);
+    // لا نحذف العنصر المنتهي قبل أن تنتهي مهلة النسخة الاحتياطية (كان هذا يعطّل fallback كلياً)
+    if (age >= STALE_TTL) memoryCache.delete(key);
   } catch {
     // تجاهل آمن
   }
@@ -496,13 +497,52 @@ function getUserRegionInfo(req) {
   return { countryCode, countryName };
 }
 
+// =========================================================================
+// 4. تنسيق الروابط: الدقة + لغة الصوت + وسوم مختصرة تفرّق بين الصفوف
+// =========================================================================
+
+const FLAG_LANG = {
+  "🇸🇦": "عربي", "🇪🇬": "عربي", "🇦🇪": "عربي", "🇰🇼": "عربي", "🇶🇦": "عربي", "🇧🇭": "عربي",
+  "🇴🇲": "عربي", "🇯🇴": "عربي", "🇱🇧": "عربي", "🇮🇶": "عربي", "🇲🇦": "عربي", "🇩🇿": "عربي",
+  "🇹🇳": "عربي", "🇸🇾": "عربي", "🇾🇪": "عربي", "🇸🇩": "عربي", "🇱🇾": "عربي", "🇵🇸": "عربي",
+  "🇬🇧": "إنجليزي", "🇺🇸": "إنجليزي", "🇫🇷": "فرنسي", "🇪🇸": "إسباني", "🇩🇪": "ألماني",
+  "🇮🇹": "إيطالي", "🇷🇺": "روسي", "🇹🇷": "تركي", "🇮🇳": "هندي", "🇯🇵": "ياباني",
+  "🇰🇷": "كوري", "🇧🇷": "برتغالي", "🇵🇹": "برتغالي", "🇨🇳": "صيني", "🇵🇱": "بولندي",
+  "🇳🇱": "هولندي", "🇮🇷": "فارسي", "🇺🇦": "أوكراني"
+};
+
+// يرجع { label, hasArabic, key } لوصف لغة الصوت المكتشفة من اسم الملف وأعلام Torrentio
+function detectAudio(full) {
+  const langs = [];
+  const add = l => { if (!langs.includes(l)) langs.push(l); };
+
+  const flags = full.match(/[\u{1F1E6}-\u{1F1FF}]{2}/gu) || [];
+  for (const f of flags) if (FLAG_LANG[f]) add(FLAG_LANG[f]);
+
+  if (/\b(arabic|ara|arb)\b|عربي|مدبلج/i.test(full)) add("عربي");
+  if (/\b(english|eng)\b/i.test(full)) add("إنجليزي");
+
+  const multi = /\bmulti(?:[\s._-]?audio|[\s._-]?lang)?\b/i.test(full);
+  const dual = /\bdual[\s._-]?audio\b/i.test(full);
+
+  const hasArabic = langs.includes("عربي");
+  langs.sort((a, b) => (a === "عربي" ? -1 : b === "عربي" ? 1 : 0));
+
+  let label;
+  if (langs.length === 0) label = multi ? "متعدد اللغات" : dual ? "صوت ثنائي" : "صوت أصلي";
+  else if (langs.length <= 3) label = langs.join(" + ");
+  else label = "متعدد اللغات";
+
+  return { label, hasArabic, key: hasArabic ? "ar" : langs.length ? langs[0] : "orig" };
+}
+
 function cleanAndFormatStream(stream) {
   try {
     const rawName = stream.name || "";
     const rawTitle = stream.title || stream.description || "";
     const full = `${rawName}\n${rawTitle}`;
 
-    // 1. استخراج الدقة فقط بشكل صافي لتكوين مربعات التصنيف في الأعلى
+    // 1. الدقة
     let resLabel = "1080p";
     let resScore = 2200;
     const resMatch = full.match(/\b(4320p|8k|2160p|4k|uhd|1440p|2k|1080p|fhd|720p|hd|480p|576p|sd)\b/i);
@@ -516,21 +556,24 @@ function cleanAndFormatStream(stream) {
       else { resLabel = "480p"; resScore = 400; }
     }
 
-    // حساب النقاط في الخلفية فقط لترتيب أفضلية التشغيل السريع بدون إظهار أي كلام زائد
+    // 2. المصدر والوسوم
     let ripBonus = 100;
-    if (/\b(Remux|BD-?Remux)\b/i.test(full)) ripBonus = 900;
-    else if (/\b(BluRay|Blu-Ray|BDRip|BRRip|BDMV)\b/i.test(full)) ripBonus = 650;
-    else if (/\b(WEB-DL|WEBDL)\b/i.test(full)) ripBonus = 500;
-    else if (/\b(WEBRip|WEB-Rip|WEB)\b/i.test(full)) ripBonus = 400;
+    let source = "";
+    if (/\b(Remux|BD-?Remux)\b/i.test(full)) { ripBonus = 900; source = "Remux"; }
+    else if (/\b(BluRay|Blu-Ray|BDRip|BRRip|BDMV)\b/i.test(full)) { ripBonus = 650; source = "BluRay"; }
+    else if (/\b(WEB-DL|WEBDL)\b/i.test(full)) { ripBonus = 500; source = "WEB-DL"; }
+    else if (/\b(WEBRip|WEB-Rip|WEB)\b/i.test(full)) { ripBonus = 400; source = "WEB"; }
 
     let visualBonus = 0;
-    if (/\b(DV|Dolby[\s.-]?Vision|DoVi)\b/i.test(full)) visualBonus += 450;
-    if (/\bHDR10\+|HDR10Plus\b/i.test(full)) visualBonus += 380;
-    else if (/\b(HDR10|HDR)\b/i.test(full)) visualBonus += 300;
+    let hdr = "";
+    if (/\b(DV|Dolby[\s.-]?Vision|DoVi)\b/i.test(full)) { visualBonus += 450; hdr = "Dolby Vision"; }
+    if (/\bHDR10\+|HDR10Plus\b/i.test(full)) { visualBonus += 380; hdr = hdr || "HDR10+"; }
+    else if (/\b(HDR10|HDR)\b/i.test(full)) { visualBonus += 300; hdr = hdr || "HDR"; }
 
     let audioBonus = 0;
-    if (/\bAtmos\b/i.test(full)) audioBonus += 350;
-    if (/\bTrueHD\b/i.test(full)) audioBonus += 300;
+    let audioCodec = "";
+    if (/\bAtmos\b/i.test(full)) { audioBonus += 350; audioCodec = "Atmos"; }
+    else if (/\bTrueHD\b/i.test(full)) { audioBonus += 300; audioCodec = "TrueHD"; }
 
     const sizeMatch = rawTitle.match(/([0-9]+(?:\.[0-9]+)?\s*(?:TB|GB|MB|GiB|MiB))/i) ||
                       rawName.match(/([0-9]+(?:\.[0-9]+)?\s*(?:TB|GB|MB|GiB|MiB))/i);
@@ -539,24 +582,34 @@ function cleanAndFormatStream(stream) {
     const seedersMatch = rawTitle.match(/(?:👤|👥|\bS:?\s*|\bSeeders:?\s*)(\d+)/i);
     const seedersCount = seedersMatch ? parseInt(seedersMatch[1], 10) : 0;
 
-    const isCached = full.includes("⚡") || 
-                     /\[(TB|RD|AD|DL|PM|OC)\+\]/i.test(full) || 
+    const isCached = full.includes("⚡") ||
+                     /\[(TB|RD|AD|DL|PM|OC)\+\]/i.test(full) ||
                      /\b(torbox|cached|instant|debrid)\b/i.test(full) ||
                      (stream.url && !stream.infoHash);
 
+    // 3. لغة الصوت
+    const audio = detectAudio(full);
+
     const sizeScore = Math.min((sizeBytes / (1024 * 1024 * 1024)) * 12, 450);
     const peerScore = Math.min(seedersCount * 0.6, 500);
-    const finalScore = (isCached ? 50000 : 0) + resScore + ripBonus + visualBonus + audioBonus + sizeScore + peerScore;
+    const arabicBonus = audio.hasArabic ? 3000 : 0; // الصوت العربي يتقدم داخل نفس المجموعة
+    const finalScore = (isCached ? 50000 : 0) + arabicBonus + resScore + ripBonus + visualBonus + audioBonus + sizeScore + peerScore;
 
-    // وضع الدقة مرة واحدة فقط في name مع إبقاء title فارغاً لمنع تكرار "4K" مرتين تحت بعض في البطاقة
+    // السطر الأول: لغة الصوت | السطر الثاني: وسوم مختصرة (تفرّق بين الصفوف المتشابهة)
+    const tags = [source, hdr, audioCodec, sizeMatch ? sizeMatch[1].replace(/\s+/g, "") : ""].filter(Boolean).join(" • ");
+    const desc = tags ? `${audio.label}\n${tags}` : audio.label;
+
     const cleanStream = {
       name: resLabel,
-      title: "",
+      title: desc,
+      description: desc,
       behaviorHints: {
-        bingeGroup: `res-${resLabel}`
+        // نفس الدقة ونفس لغة الصوت تُختار تلقائياً في الحلقة التالية
+        bingeGroup: `sov-${resLabel}-${audio.key}`
       },
       _score: finalScore,
       _res: resLabel,
+      _ar: audio.hasArabic,
       _hash: getCanonicalKey(stream)
     };
 
@@ -567,131 +620,76 @@ function cleanAndFormatStream(stream) {
       cleanStream.sources = extractTrackers(stream);
     }
     if (stream.subtitles) cleanStream.subtitles = stream.subtitles;
+    if (stream.behaviorHints?.proxyHeaders) cleanStream.behaviorHints.proxyHeaders = stream.behaviorHints.proxyHeaders;
+    if (stream.behaviorHints?.notWebReady) cleanStream.behaviorHints.notWebReady = true;
 
     return cleanStream;
   } catch {
     return {
       ...stream,
       name: "1080p",
-      title: "",
+      title: "صوت أصلي",
       _score: 0,
       _res: "1080p",
+      _ar: false,
       _hash: getCanonicalKey(stream)
     };
   }
 }
 
 // =========================================================================
-// 4. واجهة التثبيت العربية الفخمة مع تفعيل خانات الدقة العلوية (4K / 1080p / 720p)
+// 4.1 صفحة التثبيت: خفيفة (بدون Tailwind ولا خطوط خارجية)
 // =========================================================================
 
 function renderConfigPage(host) {
+  const tile = (path, big, small, accent) =>
+    `<a class="tile${accent ? " accent" : ""}" href="stremio://${host}${path}/manifest.json"><b>${big}</b><span>${small}</span></a>`;
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>المركز السيادي - Movies & Series</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --gold: #d4af37;
-      --gold-light: #f3e5ab;
-      --obsidian: #060609;
-      --panel: rgba(15, 16, 22, 0.92);
-    }
-    body {
-      font-family: 'Cairo', sans-serif;
-      background-color: var(--obsidian);
-      background-image: 
-        radial-gradient(circle at 20% 20%, rgba(212, 175, 55, 0.08) 0%, transparent 45%),
-        radial-gradient(circle at 80% 80%, rgba(212, 175, 55, 0.05) 0%, transparent 45%);
-      color: #e5e7eb;
-    }
-    .sovereign-card {
-      background: var(--panel);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(212, 175, 55, 0.25);
-      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.9);
-    }
-    .gold-gradient-text {
-      background: linear-gradient(135deg, #fff6d6 0%, #d4af37 55%, #997a15 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .gold-btn {
-      background: linear-gradient(135deg, #d4af37 0%, #aa820a 100%);
-      color: #050507;
-      transition: all 0.25s ease;
-    }
-    .gold-btn:hover {
-      filter: brightness(1.1);
-      transform: translateY(-2px);
-      box-shadow: 0 10px 25px -5px rgba(212, 175, 55, 0.5);
-    }
-    .spec-box {
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      background: rgba(255, 255, 255, 0.02);
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>المركز السيادي</title>
+<style>
+  :root{--gold:#d4af37;--bg:#08080b;--card:#111118;--line:rgba(255,255,255,.09)}
+  *{box-sizing:border-box;margin:0}
+  body{min-height:100vh;display:grid;place-items:center;padding:20px;background:var(--bg);color:#e8e8ee;
+       font-family:"Segoe UI",Tahoma,Arial,sans-serif;line-height:1.7}
+  .card{width:100%;max-width:560px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px}
+  h1{font-size:26px;color:var(--gold);margin-bottom:4px}
+  p{color:#9a9aa8;font-size:14px}
+  h2{font-size:15px;color:#f3e5ab;margin:22px 0 4px}
+  .main{display:block;margin-top:12px;padding:14px;border-radius:12px;text-align:center;font-weight:700;
+        background:var(--gold);color:#09090c;text-decoration:none}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-top:12px}
+  .tile{display:flex;flex-direction:column;align-items:center;padding:14px 8px;border:1px solid var(--line);
+        border-radius:12px;text-decoration:none;color:#fff;background:#16161e}
+  .tile b{font-size:19px}.tile span{font-size:12px;color:#9a9aa8}
+  .tile.accent{border-color:var(--gold)}.tile.accent b{color:var(--gold)}
+  .tile:hover,.main:hover{filter:brightness(1.15)}
+  button{margin-top:18px;width:100%;padding:11px;border-radius:10px;border:1px solid var(--line);background:transparent;color:#bbb;cursor:pointer;font:inherit;font-size:13px}
+</style>
 </head>
-<body class="min-h-screen flex items-center justify-center p-4 md:p-8">
-  <div class="sovereign-card max-w-2xl w-full rounded-2xl p-8 md:p-10 relative overflow-hidden">
-    <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#d4af37] to-transparent"></div>
+<body>
+<div class="card">
+  <h1>المركز السيادي</h1>
+  <p>كتالوجات وتفاصيل وترجمات معرّبة، وتبويبات بث مرتبة حسب الدقة ولغة الصوت.</p>
 
-    <div class="text-center space-y-3 border-b border-white/10 pb-7">
-      <div class="inline-block px-4 py-1 rounded border border-[#d4af37]/40 bg-[#d4af37]/10 text-[#f3e5ab] text-xs font-bold tracking-wide">
-        الإصدار الخامس عشر - تعريب فوري + خانات فرز الدقات العلوية
-      </div>
-      <h1 class="text-3xl md:text-5xl font-black gold-gradient-text pt-2">
-        Movies &amp; Series
-      </h1>
-      <p class="text-gray-400 text-sm md:text-base max-w-lg mx-auto leading-relaxed">
-        تعريب كامل للقصص والتصنيفات في الواجهة الرئيسية قبل الدخول، مع إمكانية تفعيل خانات الدقة العلوية (4K و 1080p و 720p) بجانب زر "الكل".
-      </p>
-    </div>
+  <h2>1. الإضافة الأساسية (الكتالوجات + التفاصيل + الترجمة)</h2>
+  <a class="main" href="stremio://${host}/manifest.json">تثبيت الإضافة الأساسية</a>
 
-    <div class="my-6 space-y-3">
-      <div class="text-sm font-bold text-[#f3e5ab] mb-2">
-        1. الإضافة الشاملة (الكتالوجات المعربة + الترجمة + جميع الدقات):
-      </div>
-      <a href="stremio://${host}/manifest.json" class="gold-btn w-full py-3.5 px-6 rounded-xl font-black text-center block text-sm">
-        تثبيت الإضافة الشاملة (Movies &amp; Series)
-      </a>
-
-      <div class="text-sm font-bold text-[#f3e5ab] pt-4 mb-2">
-        2. تفعيل الخانات العلوية حسب الدقة (لتظهر بجانب زر "الكل" فوق السيرفرات):
-      </div>
-      <p class="text-xs text-gray-400 mb-3">
-        ملاحظة مهمة: المشغل يضع اسم الإضافة في الخانات العلوية، لذا ثبّت الخانات التالية لتظهر لك أزرار (4K) و (1080p) و (720p) في الأعلى:
-      </p>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        <a href="stremio://${host}/4k/manifest.json" class="spec-box hover:border-[#d4af37] py-3 px-3 rounded-xl text-center block transition-all">
-          <div class="text-base font-black text-[#f3e5ab]">4K</div>
-          <div class="text-[11px] text-gray-400 mt-0.5">تثبيت خانة 4K</div>
-        </a>
-        <a href="stremio://${host}/1080p/manifest.json" class="spec-box hover:border-[#d4af37] py-3 px-3 rounded-xl text-center block transition-all">
-          <div class="text-base font-black text-white">1080p</div>
-          <div class="text-[11px] text-gray-400 mt-0.5">تثبيت خانة 1080p</div>
-        </a>
-        <a href="stremio://${host}/720p/manifest.json" class="spec-box hover:border-[#d4af37] py-3 px-3 rounded-xl text-center block transition-all">
-          <div class="text-base font-black text-white">720p</div>
-          <div class="text-[11px] text-gray-400 mt-0.5">تثبيت خانة 720p</div>
-        </a>
-        <a href="stremio://${host}/480p/manifest.json" class="spec-box hover:border-[#d4af37] py-3 px-3 rounded-xl text-center block transition-all">
-          <div class="text-base font-black text-white">480p</div>
-          <div class="text-[11px] text-gray-400 mt-0.5">تثبيت خانة 480p</div>
-        </a>
-      </div>
-    </div>
-
-    <div class="space-y-2.5 pt-2 border-t border-white/10">
-      <button onclick="navigator.clipboard.writeText('https://${host}/manifest.json'); this.innerText='تم نسخ رابط الإضافة الشاملة';" class="w-full py-3 px-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-xs font-bold text-gray-300 transition-all text-center">
-        نسخ رابط الإضافة الشاملة (Manifest URL)
-      </button>
-    </div>
+  <h2>2. تبويبات البث (ثبّت اللي تحتاجه)</h2>
+  <p>كل تبويب يظهر بجانب «الكل» في صفحة السيرفرات، ويعرض دقة الفيديو ولغة الصوت لكل رابط.</p>
+  <div class="grid">
+    ${tile("/arabic", "عربي", "صوت عربي فقط", true)}
+    ${tile("/4k", "4K", "أعلى جودة", true)}
+    ${tile("/1080p", "1080p", "Full HD")}
+    ${tile("/720p", "720p", "HD")}
+    ${tile("/480p", "480p", "خفيف")}
   </div>
+
+  <button onclick="navigator.clipboard.writeText('https://${host}/manifest.json');this.innerText='تم نسخ الرابط'">نسخ رابط الإضافة الأساسية</button>
+</div>
 </body>
 </html>`;
 }
@@ -804,6 +802,58 @@ async function buildArabicMeta(type, id) {
 }
 
 // =========================================================================
+// 5.1 بناء قائمة الروابط: متوازي مع مهلة، مشترك بين التبويبات، مع نسخة قديمة احتياطية
+// =========================================================================
+
+const streamBuilds = new Map();
+const withDeadline = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))]);
+
+const BAD_RELEASE = /hdcam|camrip|\bcam\b|telesync|\bts\b|tsrip|hdts|telecine|\bscr\b/i;
+
+function getStreamList(type, id, streamSubPath) {
+  const cacheKey = `strlist_v16_${streamSubPath}`;
+  const cached = getFromCache(cacheKey);
+  if (cached) return Promise.resolve(cached);
+  if (streamBuilds.has(cacheKey)) return streamBuilds.get(cacheKey);
+
+  const job = (async () => {
+    // المصدر الرئيسي (Torrentio/Torbox) ومعه WebStreamr يُنتظران حتى 4.2 ثانية، والباقي 2.5 ثانية فقط
+    const [torrentioData, webstreamrData, tpbData, ytsData, eztvData, publicDomainData] = await Promise.all([
+      withDeadline(safeFetchJson(`${UPSTREAM_URL}${streamSubPath}`), 4200),
+      withDeadline(safeFetchJson(`${UPSTREAM_ADDONS.webstreamr}/stream/${type}/${id}.json`), 4200),
+      withDeadline(safeFetchJson(`${UPSTREAM_ADDONS.tpbPlus}/stream/${type}/${id}.json`), 2500),
+      type === "movie" ? withDeadline(safeFetchJson(`${UPSTREAM_ADDONS.yts}/stream/${type}/${id}.json`), 2500) : null,
+      type === "series" ? withDeadline(safeFetchJson(`${UPSTREAM_ADDONS.eztv}/stream/${type}/${id}.json`), 2500) : null,
+      type === "movie" ? withDeadline(safeFetchJson(`${UPSTREAM_ADDONS.publicDomain}/stream/${type}/${id}.json`), 2500) : null
+    ]);
+
+    const unique = new Map();
+    for (const dataObj of [torrentioData, webstreamrData, ytsData, eztvData, tpbData, publicDomainData]) {
+      if (!dataObj || !Array.isArray(dataObj.streams)) continue;
+      for (const s of dataObj.streams) {
+        if (!s || (!s.url && !s.infoHash)) continue;
+        if (BAD_RELEASE.test(`${s.name || ""} ${s.title || ""} ${s.description || ""}`)) continue;
+        const item = cleanAndFormatStream(s);
+        const prev = unique.get(item._hash);
+        if (!prev || item._score > prev._score) unique.set(item._hash, item);
+      }
+    }
+
+    const list = Array.from(unique.values()).sort((a, b) => b._score - a._score);
+
+    if (list.length > 0) {
+      saveToCache(cacheKey, list);
+      return list;
+    }
+    // فشلت كل المصادر: نعرض آخر نسخة ناجحة إن وجدت
+    return getFromCache(cacheKey, true) || [];
+  })().finally(() => streamBuilds.delete(cacheKey));
+
+  streamBuilds.set(cacheKey, job);
+  return job;
+}
+
+// =========================================================================
 // 6. موجه الخادم الرئيسي (Master Handler)
 // =========================================================================
 
@@ -827,14 +877,17 @@ export default async function handler(req, res) {
       path = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
     }
 
-    // خانة دقة محددة (/4k/... أو /1080p/...)
+    // خانة بث محددة: دقة (/4k /1080p ...) أو لغة (/arabic)
     let resolutionFilter = null;
-    const resPrefixMatch = path.match(/^\/(8k|4k|2k|1080p|720p|480p)(\/.*)?$/i);
+    let arabicOnly = false;
+    const resPrefixMatch = path.match(/^\/(8k|4k|2k|1080p|720p|480p|arabic)(\/.*)?$/i);
     if (resPrefixMatch) {
-      const rawRes = resPrefixMatch[1].toUpperCase();
-      resolutionFilter = rawRes === "1080P" ? "1080p" : rawRes === "720P" ? "720p" : rawRes === "480P" ? "480p" : rawRes;
+      const raw = resPrefixMatch[1].toLowerCase();
+      if (raw === "arabic") arabicOnly = true;
+      else resolutionFilter = raw === "1080p" || raw === "720p" || raw === "480p" ? raw : raw.toUpperCase();
       path = resPrefixMatch[2] || "/";
     }
+    const tabKey = arabicOnly ? "arabic" : (resolutionFilter || "all");
 
     // -----------------------------------------------------------------
     // Manifest
@@ -843,12 +896,14 @@ export default async function handler(req, res) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       const { countryName } = getUserRegionInfo(req);
 
-      if (resolutionFilter) {
+      // إضافات البث: اسم الإضافة نفسه هو التبويب الذي يظهر في صفحة السيرفرات
+      if (resolutionFilter || arabicOnly) {
+        const label = arabicOnly ? "عربي" : resolutionFilter;
         return res.status(200).json({
-          id: `org.sovereign.arabic.res.${resolutionFilter.toLowerCase()}`,
-          version: "15.0.0",
-          name: resolutionFilter,
-          description: `سيرفرات دقة ${resolutionFilter} فقط`,
+          id: `org.sovereign.arabic.res.${tabKey.toLowerCase()}`,
+          version: "16.0.0",
+          name: label,
+          description: arabicOnly ? "روابط بصوت عربي فقط" : `روابط بدقة ${label} فقط`,
           resources: ["stream"],
           types: ["movie", "series"],
           idPrefixes: ["tt", "kitsu"],
@@ -859,10 +914,10 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         id: "org.sovereign.arabic.movies.series",
-        version: "15.0.0",
-        name: "Movies & Series",
+        version: "16.0.0",
+        name: "المركز السيادي",
         description: "المركز السيادي للأفلام والمسلسلات - تعريب فوري للقصة والحلقات والتصنيفات مع المسلسلات العربية وتصنيف الدقات",
-        resources: ["stream", "subtitles", "catalog", "meta"],
+        resources: ["catalog", "meta", "subtitles"],
         types: ["movie", "series"],
         idPrefixes: ["tt", "kitsu"],
         catalogs: [
@@ -896,7 +951,7 @@ export default async function handler(req, res) {
       res.setHeader("Cache-Control", "no-store");
       const providers = {};
       for (const [h, st] of healthMetrics) providers[h] = { fails: st.fails, healthy: !(st.fails >= 3 && Date.now() - st.lastFail < 60000) };
-      return res.status(200).json({ status: "ok", version: "15.0.0", cacheEntries: memoryCache.size, providers });
+      return res.status(200).json({ status: "ok", version: "16.0.0", cacheEntries: memoryCache.size, providers });
     }
 
     if (path === "" || path === "/") {
@@ -1070,77 +1125,25 @@ export default async function handler(req, res) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=900");
       const streamSubPath = path.substring(path.indexOf("/stream/"));
-      const cacheKey = `str_${resolutionFilter || "ALL"}_${streamSubPath}`;
-      const cachedStreams = getFromCache(cacheKey);
-      if (cachedStreams) return res.status(200).json({ streams: cachedStreams });
-
       const parts = streamSubPath.split("/").filter(Boolean);
       const type = parts[1] || "movie";
       const id = (parts[2] || "").replace(/\.json$/, "");
 
-      const [torrentioData, tpbData, ytsData, eztvData, webstreamrData, publicDomainData] = await Promise.all([
-        safeFetchJson(`${UPSTREAM_URL}${streamSubPath}`),
-        safeFetchJson(`${UPSTREAM_ADDONS.tpbPlus}/stream/${type}/${id}.json`),
-        type === "movie" ? safeFetchJson(`${UPSTREAM_ADDONS.yts}/stream/${type}/${id}.json`) : Promise.resolve(null),
-        type === "series" ? safeFetchJson(`${UPSTREAM_ADDONS.eztv}/stream/${type}/${id}.json`) : Promise.resolve(null),
-        safeFetchJson(`${UPSTREAM_ADDONS.webstreamr}/stream/${type}/${id}.json`),
-        type === "movie" ? safeFetchJson(`${UPSTREAM_ADDONS.publicDomain}/stream/${type}/${id}.json`) : Promise.resolve(null)
-      ]);
+      // القائمة الكاملة تُبنى مرة واحدة وتُشارك بين كل التبويبات (4K/1080p/عربي) بدل تكرار الطلبات
+      const list = await getStreamList(type, id, streamSubPath);
 
-      const rawCandidates = [];
-      const ingestStreams = (dataObj) => {
-        if (dataObj && Array.isArray(dataObj.streams)) {
-          for (const s of dataObj.streams) {
-            if (!s || (!s.url && !s.infoHash)) continue;
-            const combinedText = `${s.name || ""} ${s.title || ""} ${s.description || ""}`.toLowerCase();
-            if (
-              combinedText.includes("hdcam") ||
-              combinedText.includes("camrip") ||
-              combinedText.includes("telesync") ||
-              combinedText.includes("tsrip")
-            ) continue;
-            rawCandidates.push(cleanAndFormatStream(s));
-          }
-        }
-      };
+      let filtered = list;
+      if (resolutionFilter) filtered = filtered.filter(i => i._res.toUpperCase() === resolutionFilter.toUpperCase());
+      if (arabicOnly) filtered = filtered.filter(i => i._ar);
 
-      ingestStreams(torrentioData);
-      ingestStreams(webstreamrData);
-      ingestStreams(ytsData);
-      ingestStreams(eztvData);
-      ingestStreams(tpbData);
-      ingestStreams(publicDomainData);
-
-      const uniqueStreamsMap = new Map();
-      for (const item of rawCandidates) {
-        const key = item._hash;
-        const existing = uniqueStreamsMap.get(key);
-        if (!existing || (item._score || 0) > (existing._score || 0)) uniqueStreamsMap.set(key, item);
-      }
-
-      const deduplicated = Array.from(uniqueStreamsMap.values());
-      deduplicated.sort((a, b) => (b._score || 0) - (a._score || 0));
-
-      const filteredByRes = resolutionFilter
-        ? deduplicated.filter(item => item._res.toUpperCase() === resolutionFilter.toUpperCase())
-        : deduplicated;
-
-      const finalStreams = filteredByRes.slice(0, 80).map(({ _score, _hash, _res, ...cleanItem }) => cleanItem);
-
-      if (finalStreams.length > 0) {
-        saveToCache(cacheKey, finalStreams);
-      } else {
-        const stale = getFromCache(cacheKey, true);
-        if (stale) return res.status(200).json({ streams: stale });
-      }
-
+      const finalStreams = filtered.slice(0, 60).map(({ _score, _hash, _res, _ar, ...clean }) => clean);
       return res.status(200).json({ streams: finalStreams });
     }
 
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     return res.status(200).json({
       status: "نشط",
-      name: "Movies & Series - المركز السيادي V15.0"
+      name: "Movies & Series - المركز السيادي V16.0"
     });
 
   } catch {
