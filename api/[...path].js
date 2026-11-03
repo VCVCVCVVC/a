@@ -279,9 +279,9 @@ function renderConfigPage(host) {
 
 export default async function handler(req, res) {
   try {
-    // ترويسات الأمان و CORS الكاملة
+    // ترويسات الأمان و CORS الكاملة لجميع المشغلات (Stremio, Nuvio, Web)
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "*");
     res.setHeader("Cache-Control", "public, max-age=3600, stale-while-revalidate=1800");
 
@@ -289,9 +289,60 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
-    const host = req.headers["host"] || "localhost";
+    const host = req.headers["x-forwarded-host"] || req.headers["host"] || "localhost";
     const rawUrl = req.url || "/";
     const path = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
+
+    // ----------------------------------------------------
+    // أ. ملف التعريف الشامل (Federated Manifest) - متوافق كلياً مع Stremio و Nuvio
+    // ----------------------------------------------------
+    if (path === "/manifest.json" || path === "/api/index" || path === "/api" || path === "/manifest") {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      return res.status(200).json({
+        id: "org.allinone.torrentio.master.ultra",
+        version: "5.5.0",
+        name: "Stremio Master Hub Ultra Pro",
+        description: "مجمع شامل يدمج تلقائياً: تدفقات TorBox السحابية، كتالوجات منصات البث (Netflix & Disney)، ترجمات SubDL و OpenSubtitles العربية، ومكتبات Cinemeta & Public Domain",
+        resources: ["stream", "subtitles", "catalog", "meta"],
+        types: ["movie", "series", "anime", "other"],
+        catalogs: [
+          {
+            type: "movie",
+            id: "top_cinemeta_movies",
+            name: "🔥 أفلام رائجة (Cinemeta)"
+          },
+          {
+            type: "series",
+            id: "top_cinemeta_series",
+            name: "📺 مسلسلات مميزة (Cinemeta)"
+          },
+          {
+            type: "movie",
+            id: "cyberflix_netflix_movies",
+            name: "🍿 أفلام نتفلكس (Netflix Hub)"
+          },
+          {
+            type: "series",
+            id: "cyberflix_apple_series",
+            name: "🍏 مسلسلات Apple TV+"
+          },
+          {
+            type: "movie",
+            id: "cyberflix_disney_movies",
+            name: "✨ أفلام Disney+ Originals"
+          },
+          {
+            type: "movie",
+            id: "public_domain_classics",
+            name: "🏛️ كلاسيكيات السينما المجانية"
+          }
+        ],
+        behaviorHints: {
+          configurable: false,
+          configurationRequired: false
+        }
+      });
+    }
 
     // عرض واجهة التثبيت السريع عند فتح الرابط بالمتصفح
     if (path === "" || path === "/") {
