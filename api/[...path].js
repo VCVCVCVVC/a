@@ -10,9 +10,10 @@ const TIMEOUT_MS = 4500;
 
 // قائمة البلوقنات المصفاة والموثوقة (تم إزالة البلوقنات المتعارضة أو التي تتطلب مفاتيح خارجية)
 const UPSTREAM_ADDONS = {
-  // مصادر الكتالوجات والبيانات (موحدة لمنع تكرار أو تضارب البوسترات)
+  // مصادر الكتالوجات والبيانات (دعم اللغة العربية من TMDB + Cinemeta)
   cinemeta: "https://v3-cinemeta.strem.io",
-  tmdbAddon: "https://tmdb.strem.fun",
+  tmdbAddon: "https://94c8cb9f702d-tmdb-addon.baby-beamup.club/%7B%22language%22%3A%22ar-SA%22%7D",
+  tmdbFallback: "https://tmdb.strem.fun",
   cyberflix: "https://cyberflix.kamyroll.tech",
   animeKitsu: "https://anime-kitsu.strem.fun",
 
@@ -158,6 +159,84 @@ function stripAllEmojis(str) {
     .trim();
 }
 
+// قاموس تعريب التصنيفات (Genres) لضمان ظهورها بالعربية في الواجهة الرئيسية والداخلية
+const GENRE_AR_MAP = {
+  Action: "حركة وإثارة",
+  Adventure: "مغامرة",
+  Animation: "رسوم متحركة",
+  Biography: "سيرة ذاتية",
+  Comedy: "كوميديا",
+  Crime: "جريمة",
+  Documentary: "وثائقي",
+  Drama: "دراما",
+  Family: "عائلي",
+  Fantasy: "فانتازيا",
+  History: "تاريخي",
+  Horror: "رعب",
+  Music: "موسيقي",
+  Musical: "استعراضي",
+  Mystery: "غموض",
+  Romance: "رومانسي",
+  "Sci-Fi": "خيال علمي",
+  "Science Fiction": "خيال علمي",
+  Sport: "رياضي",
+  Thriller: "تشويق وإثارة",
+  War: "حرب",
+  Western: "غرب أمريكي",
+  "Action & Adventure": "حركة ومغامرة",
+  "Sci-Fi & Fantasy": "خيال علمي وفانتازيا"
+};
+
+function localizeGenres(genres) {
+  if (!Array.isArray(genres)) return [];
+  return genres.map(g => GENRE_AR_MAP[g] || g);
+}
+
+// دالة تعريب فوري للنصوص الإنجليزية (القصة والعنوان) لتظهر بالعربية في الواجهة الرئيسية قبل الدخول
+async function translateToArabic(text) {
+  if (!text || typeof text !== "string") return text;
+  // إذا كان النص يحتوي مسبقاً على حروف عربية، نرجعه كما هو
+  if (/[\u0600-\u06FF]/.test(text)) return text;
+
+  const cacheKey = `tr_ar_${text.slice(0, 120)}`;
+  const cached = getFromCache(cacheKey, true);
+  if (cached) return cached;
+
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q=${encodeURIComponent(text)}`;
+    const data = await safeFetchJson(url, {}, 2500);
+    if (Array.isArray(data) && Array.isArray(data[0])) {
+      const translated = data[0].map(part => part[0]).join("").trim();
+      if (translated) {
+        saveToCache(cacheKey, translated);
+        return translated;
+      }
+    }
+  } catch {
+    // تجاهل آمن عند فشل الترجمة
+  }
+  return text;
+}
+
+// تعريب كائن الفيلم أو المسلسل بالكامل (الوصف، التصنيفات)
+async function localizeMetaItem(item) {
+  if (!item) return item;
+  const localized = {
+    ...item,
+    name: stripAllEmojis(item.name || "")
+  };
+
+  if (Array.isArray(localized.genres)) {
+    localized.genres = localizeGenres(localized.genres);
+  }
+
+  if (localized.description && !/[\u0600-\u06FF]/.test(localized.description)) {
+    localized.description = await translateToArabic(localized.description);
+  }
+
+  return localized;
+}
+
 function parseSizeBytes(sizeStr) {
   if (!sizeStr) return 0;
   const match = sizeStr.match(/([0-9]+(?:\.[0-9]+)?)\s*(TB|GB|MB|KB|TIB|GIB|MIB|KIB)/i);
@@ -287,12 +366,10 @@ function cleanAndFormatStream(stream) {
     const peerScore = Math.min(seedersCount * 0.6, 500);
     const finalScore = (isCached ? 50000 : 0) + resScore + ripBonus + visualBonus + audioBonus + sizeScore + peerScore;
 
-    // وضع الدقة فقط في name (لتفعيل مربعات الفلترة بالأعلى: 4K / 1080p / 720p)
-    // ووضع الدقة فقط في البطاقة بدون أي كلام إضافي نهائياً كما طلبت
+    // وضع الدقة مرة واحدة فقط في name مع إبقاء title فارغاً لمنع تكرار "4K" مرتين تحت بعض في البطاقة
     const cleanStream = {
       name: resLabel,
-      title: resLabel,
-      description: resLabel,
+      title: "",
       behaviorHints: {
         bingeGroup: `res-${resLabel}`
       },
@@ -314,8 +391,7 @@ function cleanAndFormatStream(stream) {
     return {
       ...stream,
       name: "1080p",
-      title: "1080p",
-      description: "1080p",
+      title: "",
       _score: 0,
       _res: "1080p",
       _hash: getCanonicalKey(stream)
@@ -324,7 +400,7 @@ function cleanAndFormatStream(stream) {
 }
 
 // =========================================================================
-// 4. واجهة التثبيت العربية الفخمة الصافية (بدون إيموجي وبدون تداخل لغات)
+// 4. واجهة التثبيت العربية الفخمة مع تفعيل خانات الدقة العلوية (4K / 1080p / 720p)
 // =========================================================================
 
 function renderConfigPage(host) {
@@ -384,67 +460,53 @@ function renderConfigPage(host) {
 
     <div class="text-center space-y-3 border-b border-white/10 pb-7">
       <div class="inline-block px-4 py-1 rounded border border-[#d4af37]/40 bg-[#d4af37]/10 text-[#f3e5ab] text-xs font-bold tracking-wide">
-        الإصدار العاشر // معمارية عربية صافية بدون تداخل
+        الإصدار الثاني عشر // تعريب فوري + خانات فرز الدقات العلوية
       </div>
       <h1 class="text-3xl md:text-5xl font-black gold-gradient-text pt-2">
         Movies &amp; Series
       </h1>
       <p class="text-gray-400 text-sm md:text-base max-w-lg mx-auto leading-relaxed">
-        منظومة متكاملة تجمع أقوى سيرفرات البث السحابي الفوري والترجمة العربية التلقائية بتصميم فخم ومرتب بدون أي تعارض بين الإضافات.
+        تعريب كامل للقصص والتصنيفات في الواجهة الرئيسية قبل الدخول، مع إمكانية تفعيل خانات الدقة العلوية (4K و 1080p و 720p) بجانب زر "الكل".
       </p>
     </div>
 
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 my-7">
-      <div class="spec-box p-3.5 rounded-lg text-center">
-        <div class="text-xs text-gray-400">الأقسام الرئيسية</div>
-        <div class="text-sm font-bold text-[#f3e5ab] mt-1">Movies / Series</div>
+    <div class="my-6 space-y-3">
+      <div class="text-sm font-bold text-[#f3e5ab] mb-2">
+        1. الإضافة الشاملة (الكتالوجات المعربة + الترجمة + جميع الدقات):
       </div>
-      <div class="spec-box p-3.5 rounded-lg text-center">
-        <div class="text-xs text-gray-400">منع التداخل</div>
-        <div class="text-sm font-bold text-emerald-400 mt-1">مفعل 100%</div>
-      </div>
-      <div class="spec-box p-3.5 rounded-lg text-center">
-        <div class="text-xs text-gray-400">التخزين السحابي</div>
-        <div class="text-sm font-bold text-[#f3e5ab] mt-1">TorBox فوري</div>
-      </div>
-      <div class="spec-box p-3.5 rounded-lg text-center">
-        <div class="text-xs text-gray-400">دقة العرض</div>
-        <div class="text-sm font-bold text-[#f3e5ab] mt-1">حتى 8K و 4K</div>
-      </div>
-    </div>
-
-    <div class="space-y-3 mb-8">
-      <div class="flex items-center justify-between p-4 spec-box rounded-lg">
-        <div>
-          <div class="text-sm font-bold text-white">كتالوجات مستقلة بدون تكرار (Movies &amp; Series)</div>
-          <div class="text-xs text-gray-400 mt-1">فصل تام بين قوائم الأفلام والمسلسلات لمنع تداخل البوسترات والمعلومات</div>
-        </div>
-        <span class="text-xs font-bold px-3 py-1 rounded border border-[#d4af37]/40 text-[#f3e5ab] bg-[#d4af37]/10">نشط</span>
-      </div>
-
-      <div class="flex items-center justify-between p-4 spec-box rounded-lg">
-        <div>
-          <div class="text-sm font-bold text-white">فلتر توحيد الروابط ومنع تكرار السيرفرات</div>
-          <div class="text-xs text-gray-400 mt-1">دمج ذكي للسيرفرات المتشابهة وترتيب السحابي الفوري في الصدارة</div>
-        </div>
-        <span class="text-xs font-bold px-3 py-1 rounded border border-[#d4af37]/40 text-[#f3e5ab] bg-[#d4af37]/10">نشط</span>
-      </div>
-
-      <div class="flex items-center justify-between p-4 spec-box rounded-lg">
-        <div>
-          <div class="text-sm font-bold text-white">محرك الترجمة العربية الموحد</div>
-          <div class="text-xs text-gray-400 mt-1">جلب تلقائي للترجمات العربية من SubDL و Subscene و OpenSubtitles</div>
-        </div>
-        <span class="text-xs font-bold px-3 py-1 rounded border border-[#d4af37]/40 text-[#f3e5ab] bg-[#d4af37]/10">نشط</span>
-      </div>
-    </div>
-
-    <div class="space-y-3">
-      <a href="stremio://${host}/manifest.json" class="gold-btn w-full py-4 px-6 rounded-xl font-black text-center block text-base">
-        تثبيت الإضافة مباشرة في التطبيق
+      <a href="stremio://${host}/manifest.json" class="gold-btn w-full py-3.5 px-6 rounded-xl font-black text-center block text-sm">
+        تثبيت الإضافة الشاملة (Movies &amp; Series)
       </a>
-      <button onclick="navigator.clipboard.writeText('https://${host}/manifest.json'); this.innerText='تم نسخ رابط الإضافة بنجاح';" class="w-full py-3.5 px-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-xs font-bold text-gray-300 transition-all text-center">
-        نسخ رابط التثبيت اليدوي (Manifest URL)
+
+      <div class="text-sm font-bold text-[#f3e5ab] pt-4 mb-2">
+        2. تفعيل الخانات العلوية حسب الدقة (لتظهر بجانب زر "الكل" فوق السيرفرات):
+      </div>
+      <p class="text-xs text-gray-400 mb-3">
+        ملاحظة مهمة: المشغل يضع اسم الإضافة في الخانات العلوية، لذا ثبّت الخانات التالية لتظهر لك أزرار (4K) و (1080p) و (720p) في الأعلى:
+      </p>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        <a href="stremio://${host}/4k/manifest.json" class="spec-box hover:border-[#d4af37] py-3 px-3 rounded-xl text-center block transition-all">
+          <div class="text-base font-black text-[#f3e5ab]">4K</div>
+          <div class="text-[11px] text-gray-400 mt-0.5">تثبيت خانة 4K</div>
+        </a>
+        <a href="stremio://${host}/1080p/manifest.json" class="spec-box hover:border-[#d4af37] py-3 px-3 rounded-xl text-center block transition-all">
+          <div class="text-base font-black text-white">1080p</div>
+          <div class="text-[11px] text-gray-400 mt-0.5">تثبيت خانة 1080p</div>
+        </a>
+        <a href="stremio://${host}/720p/manifest.json" class="spec-box hover:border-[#d4af37] py-3 px-3 rounded-xl text-center block transition-all">
+          <div class="text-base font-black text-white">720p</div>
+          <div class="text-[11px] text-gray-400 mt-0.5">تثبيت خانة 720p</div>
+        </a>
+        <a href="stremio://${host}/480p/manifest.json" class="spec-box hover:border-[#d4af37] py-3 px-3 rounded-xl text-center block transition-all">
+          <div class="text-base font-black text-white">480p</div>
+          <div class="text-[11px] text-gray-400 mt-0.5">تثبيت خانة 480p</div>
+        </a>
+      </div>
+    </div>
+
+    <div class="space-y-2.5 pt-2 border-t border-white/10">
+      <button onclick="navigator.clipboard.writeText('https://${host}/manifest.json'); this.innerText='تم نسخ رابط الإضافة الشاملة';" class="w-full py-3 px-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-xs font-bold text-gray-300 transition-all text-center">
+        نسخ رابط الإضافة الشاملة (Manifest URL)
       </button>
     </div>
   </div>
@@ -469,20 +531,47 @@ export default async function handler(req, res) {
 
     const host = req.headers["x-forwarded-host"] || req.headers["host"] || "localhost";
     const rawUrl = req.url || "/";
-    const path = decodeURIComponent(rawUrl.split("?")[0]).replace(/\/+$/, "") || "/";
+    let path = decodeURIComponent(rawUrl.split("?")[0]).replace(/\/+$/, "") || "/";
+
+    // فحص ما إذا كان الطلب موجهاً لخانة دقة محددة (/4k/... أو /1080p/... أو /720p/... أو /480p/...)
+    let resolutionFilter = null;
+    const resPrefixMatch = path.match(/^\/(8k|4k|2k|1080p|720p|480p)(\/.*)?$/i);
+    if (resPrefixMatch) {
+      const rawRes = resPrefixMatch[1].toUpperCase();
+      resolutionFilter = rawRes === "1080P" ? "1080p" : rawRes === "720P" ? "720p" : rawRes === "480P" ? "480p" : rawRes;
+      path = resPrefixMatch[2] || "/";
+    }
 
     // -----------------------------------------------------------------
-    // ب. ملف التعريف (Manifest) - يشمل الترند المتغير وأفضل 10 في منطقتك
+    // ب. ملف التعريف (Manifest) - يدعم الإضافة الشاملة أو خانات الدقة المستقلة
     // -----------------------------------------------------------------
     if (path === "/manifest.json" || path === "/api/index" || path === "/api" || path === "/manifest") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       const { countryName } = getUserRegionInfo(req);
 
+      // إذا قام المستخدم بتثبيت خانة دقة مخصصة (مثل 4K أو 1080p) لتظهر كزر علوي مستقل في المشغل
+      if (resolutionFilter) {
+        return res.status(200).json({
+          id: `org.sovereign.arabic.res.${resolutionFilter.toLowerCase()}`,
+          version: "12.0.0",
+          name: resolutionFilter,
+          description: `سيرفرات دقة ${resolutionFilter} فقط`,
+          resources: ["stream"],
+          types: ["movie", "series"],
+          idPrefixes: ["tt", "kitsu"],
+          catalogs: [],
+          behaviorHints: {
+            configurable: false,
+            configurationRequired: false
+          }
+        });
+      }
+
       return res.status(200).json({
         id: "org.sovereign.arabic.movies.series",
-        version: "11.0.0",
+        version: "12.0.0",
         name: "Movies & Series",
-        description: "المركز السيادي للأفلام والمسلسلات | تصنيف الدقات الصافي (4K / 1080p) مع الترند وأفضل 10 في منطقتك",
+        description: "المركز السيادي للأفلام والمسلسلات | تعريب فوري للقصة والعناوين مع تصنيف الدقات والترند",
         resources: ["stream", "subtitles", "catalog", "meta"],
         types: ["movie", "series"],
         idPrefixes: ["tt", "kitsu"],
@@ -543,7 +632,7 @@ export default async function handler(req, res) {
     }
 
     // -----------------------------------------------------------------
-    // ج. مسار الكتالوجات (يدعم أفضل 10 في منطقتك + الترند اليومي المتغير)
+    // ج. مسار الكتالوجات (مع تعريب فوري للقصة والتصنيفات في الواجهة الخارجية)
     // -----------------------------------------------------------------
     if (path.includes("/catalog/")) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -554,20 +643,20 @@ export default async function handler(req, res) {
       const extraPart = parts[3] ? parts[3].replace(".json", "") : "";
 
       const { countryCode } = getUserRegionInfo(req);
-      // مفتاح يومي متغير لتحديث الترند وأفضل 10 يومياً حسب المنطقة
       const daySeed = Math.floor(Date.now() / (1000 * 60 * 60 * 12));
 
-      const cacheKey = `cat_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
+      const cacheKey = `cat_ar_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
       const cachedCat = getFromCache(cacheKey);
       if (cachedCat) return res.status(200).json(cachedCat);
 
       const extraSuffix = extraPart ? `/${extraPart}.json` : ".json";
-      let primaryUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${extraSuffix}`;
-      let fallbackUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.top${extraSuffix}`;
+      // الأولوية لكتالوج TMDB المعرب ثم Cinemeta مع التعريب الفوري
+      let primaryUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.top${extraSuffix}`;
+      let fallbackUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${extraSuffix}`;
 
       if (catalogId === "trending_daily_movies" || catalogId === "trending_daily_series") {
         primaryUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.trending${extraSuffix}`;
-        fallbackUrl = `${UPSTREAM_ADDONS.cyberflix}/catalog/${type}/netflix${extraSuffix}`;
+        fallbackUrl = `${UPSTREAM_ADDONS.tmdbFallback}/catalog/${type}/tmdb.trending${extraSuffix}`;
       } else if (catalogId === "top10_region_movies" || catalogId === "top10_region_series") {
         primaryUrl = `${UPSTREAM_ADDONS.tmdbAddon}/catalog/${type}/tmdb.trending.json`;
         fallbackUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top.json`;
@@ -576,6 +665,9 @@ export default async function handler(req, res) {
       let data = await safeFetchJson(primaryUrl);
       if (!data || !Array.isArray(data.metas) || data.metas.length === 0) {
         data = await safeFetchJson(fallbackUrl);
+      }
+      if (!data || !Array.isArray(data.metas) || data.metas.length === 0) {
+        data = await safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${extraSuffix}`);
       }
 
       let cleanMetas = [];
@@ -587,7 +679,8 @@ export default async function handler(req, res) {
             seenIds.add(m.id);
             cleanMetas.push({
               ...m,
-              name: stripAllEmojis(m.name || "")
+              name: stripAllEmojis(m.name || ""),
+              genres: localizeGenres(m.genres)
             });
           }
         }
@@ -609,13 +702,19 @@ export default async function handler(req, res) {
         }));
       }
 
-      const payload = { metas: cleanMetas };
-      if (cleanMetas.length > 0) saveToCache(cacheKey, payload);
+      // تعريب القصص (Descriptions) لأول 20 عنصر في الكتالوج بشكل متوازٍ وسريع حتى تظهر بالعربية في الواجهة الرئيسية
+      const topBatch = cleanMetas.slice(0, 20);
+      const restBatch = cleanMetas.slice(20);
+      const localizedTopBatch = await Promise.all(topBatch.map(item => localizeMetaItem(item)));
+      const finalMetas = [...localizedTopBatch, ...restBatch];
+
+      const payload = { metas: finalMetas };
+      if (finalMetas.length > 0) saveToCache(cacheKey, payload);
       return res.status(200).json(payload);
     }
 
     // -----------------------------------------------------------------
-    // د. مسار تفاصيل العرض (Meta) بدون تعارض
+    // د. مسار تفاصيل العرض (Meta) - معرب بالكامل (الاسم + القصة + التصنيفات)
     // -----------------------------------------------------------------
     if (path.includes("/meta/")) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -623,7 +722,7 @@ export default async function handler(req, res) {
       const type = parts[1] || "movie";
       const id = (parts[2] || "").replace(".json", "");
 
-      const cacheKey = `meta_${type}_${id}`;
+      const cacheKey = `meta_ar_${type}_${id}`;
       const cachedMeta = getFromCache(cacheKey);
       if (cachedMeta) return res.status(200).json(cachedMeta);
 
@@ -631,14 +730,29 @@ export default async function handler(req, res) {
       if (id.startsWith("kitsu:")) {
         metaRes = await safeFetchJson(`${UPSTREAM_ADDONS.animeKitsu}/meta/${type}/${id}.json`);
       } else {
-        metaRes = await safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/meta/${type}/${id}.json`);
-        if (!metaRes || !metaRes.meta) {
-          metaRes = await safeFetchJson(`${UPSTREAM_ADDONS.tmdbAddon}/meta/${type}/${id}.json`);
+        // جلب البيانات العربية من TMDB-AR بالتوازي مع Cinemeta لضمان وجود القصة العربية والحلقات الكاملة
+        const [arMetaRes, cinemetaRes] = await Promise.all([
+          safeFetchJson(`${UPSTREAM_ADDONS.tmdbAddon}/meta/${type}/${id}.json`),
+          safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/meta/${type}/${id}.json`)
+        ]);
+
+        if (cinemetaRes && cinemetaRes.meta) {
+          metaRes = cinemetaRes;
+          if (arMetaRes && arMetaRes.meta) {
+            if (arMetaRes.meta.name && /[\u0600-\u06FF]/.test(arMetaRes.meta.name)) {
+              metaRes.meta.name = arMetaRes.meta.name;
+            }
+            if (arMetaRes.meta.description && /[\u0600-\u06FF]/.test(arMetaRes.meta.description)) {
+              metaRes.meta.description = arMetaRes.meta.description;
+            }
+          }
+        } else {
+          metaRes = arMetaRes;
         }
       }
 
       if (metaRes && metaRes.meta) {
-        metaRes.meta.name = stripAllEmojis(metaRes.meta.name || "");
+        metaRes.meta = await localizeMetaItem(metaRes.meta);
         const resultObj = { meta: metaRes.meta };
         saveToCache(cacheKey, resultObj);
         return res.status(200).json(resultObj);
@@ -650,88 +764,12 @@ export default async function handler(req, res) {
     // -----------------------------------------------------------------
     // هـ. مسار الترجمات العربية (معزول ومفلتر)
     // -----------------------------------------------------------------
-    if (path.includes("/subtitles/")) {
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const parts = path.substring(path.indexOf("/subtitles/")).split("/").filter(Boolean);
-      const type = parts[1] || "movie";
-      const id = (parts[2] || "").replace(".json", "");
-      const imdbId = id.split(":")[0];
-
-      const cacheKey = `sub_${type}_${id}`;
-      const cachedSubs = getFromCache(cacheKey);
-      if (cachedSubs) return res.status(200).json({ subtitles: cachedSubs });
-
-      const [subdlRes, subsceneRes, osV3Res, yifyRes, osDirectRes] = await Promise.all([
-        safeFetchJson(`${UPSTREAM_ADDONS.subdl}/subtitles/${type}/${id}.json`),
-        safeFetchJson(`${UPSTREAM_ADDONS.subscene}/subtitles/${type}/${id}.json`),
-        safeFetchJson(`${UPSTREAM_ADDONS.opensubtitlesV3}/subtitles/${type}/${id}.json`),
-        type === "movie" ? safeFetchJson(`${UPSTREAM_ADDONS.yifysubs}/subtitles/${type}/${id}.json`) : Promise.resolve(null),
-        OPENSUBTITLES_API_KEY && imdbId.startsWith("tt")
-          ? safeFetchJson(
-              `https://api.opensubtitles.com/api/v1/subtitles?imdb_id=${imdbId.replace("tt", "")}&languages=ar,en`,
-              { "Api-Key": OPENSUBTITLES_API_KEY }
-            )
-          : Promise.resolve(null)
-      ]);
-
-      const collected = [];
-
-      const appendSubs = (data, defaultLang = "ar") => {
-        if (data && Array.isArray(data.subtitles)) {
-          for (const s of data.subtitles) {
-            if (s && s.url) {
-              collected.push({
-                id: s.id || `sub_${collected.length}`,
-                url: s.url,
-                lang: s.lang || defaultLang
-              });
-            }
-          }
-        }
-      };
-
-      appendSubs(subdlRes, "ar");
-      appendSubs(subsceneRes, "ar");
-      appendSubs(osV3Res, "en");
-      appendSubs(yifyRes, "en");
-
-      if (osDirectRes && Array.isArray(osDirectRes.data)) {
-        for (const item of osDirectRes.data) {
-          const fileId = item?.attributes?.files?.[0]?.file_id;
-          if (fileId) {
-            collected.push({
-              id: `os_direct_${item.id}`,
-              url: `https://api.opensubtitles.com/api/v1/download/${fileId}`,
-              lang: item.attributes.language || "ar"
-            });
-          }
-        }
-      }
-
-      const uniqueMap = new Map();
-      for (const sub of collected) {
-        if (!uniqueMap.has(sub.url)) {
-          uniqueMap.set(sub.url, sub);
-        }
-      }
-
-      const sortedSubs = Array.from(uniqueMap.values()).sort((a, b) => {
-        const aAr = /^(ar|ara|arabic)$/i.test(a.lang) ? 1 : 0;
-        const bAr = /^(ar|ara|arabic)$/i.test(b.lang) ? 1 : 0;
-        return bAr - aAr;
-      });
-
-      if (sortedSubs.length > 0) saveToCache(cacheKey, sortedSubs);
-      return res.status(200).json({ subtitles: sortedSubs });
-    }
-
-    // -----------------------------------------------------------------
-    // و. مسار البث الموحد (منع تداخل البلوقنات وتكرار نفس التورنت)
+    // و. مسار البث الموحد (مع دعم الفلترة حسب خانة الدقة 4K / 1080p / 720p)
     // -----------------------------------------------------------------
     if (path.includes("/stream/")) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       const streamSubPath = path.substring(path.indexOf("/stream/"));
-      const cacheKey = `str_${streamSubPath}`;
+      const cacheKey = `str_${resolutionFilter || "ALL"}_${streamSubPath}`;
       const cachedStreams = getFromCache(cacheKey);
       if (cachedStreams) return res.status(200).json({ streams: cachedStreams });
 
@@ -796,7 +834,12 @@ export default async function handler(req, res) {
       const deduplicated = Array.from(uniqueStreamsMap.values());
       deduplicated.sort((a, b) => (b._score || 0) - (a._score || 0));
 
-      const finalStreams = deduplicated.slice(0, 80).map(({ _score, _hash, _res, ...cleanItem }) => cleanItem);
+      // إذا كان الطلب قادماً من خانة دقة مخصصة (مثل 4K أو 1080p أو 720p) نرجع سيرفرات تلك الدقة فقط
+      const filteredByRes = resolutionFilter
+        ? deduplicated.filter(item => item._res.toUpperCase() === resolutionFilter.toUpperCase())
+        : deduplicated;
+
+      const finalStreams = filteredByRes.slice(0, 80).map(({ _score, _hash, _res, ...cleanItem }) => cleanItem);
 
       if (finalStreams.length > 0) {
         saveToCache(cacheKey, finalStreams);
@@ -811,7 +854,7 @@ export default async function handler(req, res) {
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     return res.status(200).json({
       status: "نشط",
-      name: "Movies & Series // المركز السيادي V10.0"
+      name: "Movies & Series // المركز السيادي V12.0"
     });
 
   } catch {
