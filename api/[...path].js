@@ -59,7 +59,7 @@ const UPSTREAM_URL = (process.env.UPSTREAM_URL || "https://torrentio.strem.fun/q
 const ENABLE_P2P = process.env.ENABLE_P2P !== "0";
 const CACHE_TTL = 25 * 60 * 1000;
 const STALE_TTL = 90 * 60 * 1000;
-const TIMEOUT_MS = 4500;
+const TIMEOUT_MS = 3500;
 
 // قائمة البلوقنات المصفاة والموثوقة (تم إزالة البلوقنات المتعارضة أو التي تتطلب مفاتيح خارجية)
 const UPSTREAM_ADDONS = {
@@ -424,7 +424,18 @@ function applyPlot(item, plot) {
   item.synopsis = plot;
 }
 
-// تعريب عناصر الكتالوج: تنظيف الأسماء والتصنيفات ثم ترجمة كل قصة غير عربية
+// الترجمة المخزّنة مسبقاً (فورية بلا شبكة)
+function cachedArabic(text) {
+  if (!text || typeof text !== "string") return null;
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return null;
+  if (isTextArabic(clean)) return clean;
+  const c = getFromCache(`tr_ar_v15_${hashStr(clean)}`, true);
+  return c && isTextArabic(c) ? c : null;
+}
+
+// تعريب عناصر الكتالوج بسرعة: تنظيف الأسماء والتصنيفات + تطبيق الترجمات المخزّنة فقط.
+// ما لم يُترجم بعد يُترجم في الخلفية ويظهر مترجماً في صفحة التفاصيل (لا ننتظره هنا).
 async function localizeCatalogList(items, type = "movie") {
   if (!Array.isArray(items) || items.length === 0) return { items: [], complete: true };
 
@@ -435,43 +446,17 @@ async function localizeCatalogList(items, type = "movie") {
     genre: Array.isArray(item.genre) ? localizeGenres(item.genre) : item.genre
   }));
 
-  // العناصر العلوية بلا قصة: نجلبها من TMDB العربي ثم Cinemeta
-  await mapLimit(prepared.slice(0, 15), 5, async (item) => {
-    if (pickPlot(item) || !item.id || !String(item.id).startsWith("tt")) return;
-    const arMeta = await safeFetchJson(`${UPSTREAM_ADDONS.tmdbAddon}/meta/${type}/${item.id}.json`, {}, 2500);
-    let plot = arMeta?.meta?.description || arMeta?.meta?.overview;
-    if (!plot) {
-      const enMeta = await safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/meta/${type}/${item.id}.json`, {}, 2500);
-      plot = enMeta?.meta?.description;
-    }
-    if (plot) applyPlot(item, plot);
-  });
-
-  const needIdx = [];
-  const needTexts = [];
+  const background = [];
   prepared.forEach((item, i) => {
-    const p = pickPlot(item);
-    if (p && !isTextArabic(p)) {
-      needIdx.push(i);
-      needTexts.push(p);
-    } else if (p) {
-      applyPlot(item, p);
-    }
+    const plot = pickPlot(item);
+    if (!plot) return;
+    const ar = cachedArabic(plot);
+    if (ar) applyPlot(item, ar);
+    else if (i < 12) background.push(plot);
   });
+  if (background.length) translateMany(background, { limit: 4, budgetMs: 6000 }).catch(() => {});
 
-  if (needTexts.length) {
-    const translated = await translateMany(needTexts, { limit: 8, budgetMs: 6500 });
-    needIdx.forEach((idx, k) => {
-      const out = translated[k];
-      applyPlot(prepared[idx], out || needTexts[k]);
-    });
-  }
-
-  const complete = prepared.every(item => {
-    const p = pickPlot(item);
-    return !p || isTextArabic(p);
-  });
-  return { items: prepared, complete };
+  return { items: prepared, complete: true };
 }
 
 function parseSizeBytes(sizeStr) {
@@ -764,16 +749,18 @@ function renderConfigPage(host) {
   <h1>${ADDON_NAME}</h1>
   <p>كتالوجات وتفاصيل وترجمات معرّبة، وبث سريع مرتب حسب الدقة ولغة الصوت.</p>
 
-  <h2>1. الإضافة الأساسية (الكتالوجات + التفاصيل + الترجمة)</h2>
+  <h2>1. التثبيت الكامل (كتالوجات + تفاصيل + ترجمة + بث) - يعمل مباشرة</h2>
   <a class="main" href="stremio://${host}/manifest.json">تثبيت ${ADDON_NAME}</a>
 
-  <h2>2. مربعات الفلترة (تظهر كتبويبات صغيرة في شاشة السيرفرات)</h2>
+  <h2>2. مربعات الفلترة (اختياري - تظهر كتبويبات صغيرة بجانب 1take2)</h2>
   <div class="grid">
     ${tile("4k", true)}${tile("1080p", true)}${tile("hdr", true)}${tile("720p", true)}
     ${tile("arabic")}${tile("cached")}
   </div>
   <button class="main" id="all" onclick="installAll(this)">تثبيت كل المربعات بالتتابع</button>
-  <div class="warn">ثبّت مربعاً واحداً على الأقل، وإلا سيظهر «التشغيل غير متاح» لأن الإضافة الأساسية لا تحتوي بثاً.</div>
+  <div class="warn">تريد المربعات فقط بدون تبويب «${ADDON_NAME}»؟ ثبّت
+    <a href="stremio://${host}/lite/manifest.json" style="color:#fff">النسخة الخفيفة (بدون بث)</a>
+    بدل التثبيت الكامل، ثم ثبّت مربعاً واحداً على الأقل، وإلا سيظهر «التشغيل غير متاح».</div>
 
   <button class="copy" onclick="navigator.clipboard.writeText('https://${host}/manifest.json');this.innerText='تم نسخ الرابط'">نسخ رابط الإضافة الأساسية</button>
 </div>
@@ -821,7 +808,7 @@ async function buildArabicMeta(type, id) {
     base = k?.meta || null;
   } else {
     const [arRes, cineRes] = await Promise.all([
-      safeFetchJson(`${UPSTREAM_ADDONS.tmdbAddon}/meta/${type}/${id}.json`),
+      safeFetchJson(`${UPSTREAM_ADDONS.tmdbAddon}/meta/${type}/${id}.json`, {}, 2500),
       safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/meta/${type}/${id}.json`)
     ]);
     arMeta = arRes?.meta || null;
@@ -878,22 +865,26 @@ async function buildArabicMeta(type, id) {
   }
 
   let complete = true;
-  if (toTranslate.length) {
-    const results = await translateMany(toTranslate.map(t => t.text), { limit: 8, budgetMs: 7000 });
-    toTranslate.forEach((t, k) => {
-      const out = results[k];
-      const ok = out && isTextArabic(out);
-      if (t.kind === "plot") {
-        if (ok) plot = out; else complete = false;
-      } else if (t.kind === "ov") {
-        if (ok) {
-          meta.videos[t.idx].overview = out;
-          meta.videos[t.idx].description = out;
-        } else {
-          complete = false;
-        }
-      }
-    });
+  const missing = [];
+  for (const t of toTranslate) {
+    const ar = cachedArabic(t.text);
+    if (!ar) { missing.push(t); continue; }
+    if (t.kind === "plot") plot = ar;
+    else { meta.videos[t.idx].overview = ar; meta.videos[t.idx].description = ar; }
+  }
+
+  // القصة العامة ننتظرها قليلاً (2.2 ثانية) لأنها أهم ما في الصفحة
+  const plotJob = missing.find(t => t.kind === "plot");
+  if (plotJob) {
+    const out = await translateToArabic(plotJob.text, Date.now() + 2200);
+    if (out && isTextArabic(out)) plot = out; else complete = false;
+  }
+
+  // قصص الحلقات: تُترجم في الخلفية وتُخزَّن، وتظهر في الفتح التالي بلا انتظار
+  const epJobs = missing.filter(t => t.kind === "ov");
+  if (epJobs.length) {
+    complete = false;
+    translateMany(epJobs.slice(0, 40).map(t => t.text), { limit: 4, budgetMs: 9000 }).catch(() => {});
   }
 
   if (plot) applyPlot(meta, plot);
@@ -1000,7 +991,7 @@ export default async function handler(req, res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "*");
-    res.setHeader("Cache-Control", "public, max-age=1800, stale-while-revalidate=3600");
+    res.setHeader("Cache-Control", "public, max-age=600, s-maxage=1800, stale-while-revalidate=86400");
 
     if (req.method === "OPTIONS") {
       return res.status(200).end();
@@ -1014,6 +1005,11 @@ export default async function handler(req, res) {
     } catch {
       path = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
     }
+
+    // /lite: نفس الإضافة الأساسية لكن بدون بث (لمن يستخدم المربعات فقط)
+    let lite = false;
+    const liteMatch = path.match(/^\/lite(\/.*)?$/i);
+    if (liteMatch) { lite = true; path = liteMatch[1] || "/"; }
 
     // مربع بث محدد: /4k /1080p /hdr /720p /480p /arabic /cached (و /all القديم)
     let tab = null;
@@ -1048,11 +1044,11 @@ export default async function handler(req, res) {
       }
 
       return res.status(200).json({
-        id: "app.onetake2.main",
+        id: lite ? "app.onetake2.lite" : "app.onetake2.main",
         version: VERSION,
         name: ADDON_NAME,
         description: "1take2 للأفلام والمسلسلات - تعريب فوري للقصة والحلقات والتصنيفات مع المسلسلات العربية وتصنيف الدقات",
-        resources: ["catalog", "meta", "subtitles"],
+        resources: lite ? ["catalog", "meta", "subtitles"] : ["catalog", "meta", "subtitles", "stream"],
         types: ["movie", "series"],
         idPrefixes: ["tt", "kitsu"],
         catalogs: [
@@ -1139,10 +1135,13 @@ export default async function handler(req, res) {
       // التصنيفات في الـ manifest بالإنجليزية بينما TMDB العربي يتوقعها بالعربية، فنعتمد Cinemeta وحده عند الفلترة بالتصنيف
       const skipTmdb = !isNuvio && Boolean(extra.genre) && !extra.search;
 
-      const [tmdbData, cinemetaData] = await Promise.all([
-        skipTmdb ? Promise.resolve(null) : safeFetchJson(tmdbUrl),
-        cinemetaUrl ? safeFetchJson(cinemetaUrl) : Promise.resolve(null)
-      ]);
+      const tmdbP = skipTmdb ? Promise.resolve(null) : safeFetchJson(tmdbUrl);
+      const cineP = cinemetaUrl ? safeFetchJson(cinemetaUrl) : Promise.resolve(null);
+      const tmdbData = await tmdbP;
+      // وصلت قائمة TMDB: Cinemeta احتياطي للقصص فقط فلا ننتظره أكثر من لحظة
+      const cinemetaData = (Array.isArray(tmdbData?.metas) && tmdbData.metas.length)
+        ? await withDeadline(cineP, 300)
+        : await cineP;
 
       const arabicPlotsById = new Map();
       if (Array.isArray(tmdbData?.metas)) {
@@ -1198,7 +1197,7 @@ export default async function handler(req, res) {
       const payload = { metas: finalMetas };
       // لا نخزّن قائمة فيها قصة إنجليزية حتى لا تبقى 25 دقيقة (كان هذا سبب الخلط)
       if (finalMetas.length > 0 && complete) saveToCache(cacheKey, payload);
-      else res.setHeader("Cache-Control", "public, max-age=120");
+      else res.setHeader("Cache-Control", "public, max-age=60, s-maxage=60");
       return res.status(200).json(payload);
     }
 
@@ -1220,7 +1219,7 @@ export default async function handler(req, res) {
 
       const resultObj = { meta: built.meta };
       if (built.complete) saveToCache(cacheKey, resultObj);
-      else res.setHeader("Cache-Control", "public, max-age=120");
+      else res.setHeader("Cache-Control", "public, max-age=60, s-maxage=60");
       return res.status(200).json(resultObj);
     }
 
@@ -1263,7 +1262,7 @@ export default async function handler(req, res) {
     // -----------------------------------------------------------------
     if (path.includes("/stream/")) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=900");
+      res.setHeader("Cache-Control", "public, max-age=120, s-maxage=300, stale-while-revalidate=900");
       const streamSubPath = path.substring(path.indexOf("/stream/"));
       const parts = streamSubPath.split("/").filter(Boolean);
       const type = parts[1] || "movie";
@@ -1276,7 +1275,7 @@ export default async function handler(req, res) {
 
       const finalStreams = filtered.slice(0, 60).map(stripPrivate);
       // نتيجة فارغة: لا نثبّتها في كاش المتصفح/CDN طويلاً
-      if (finalStreams.length === 0) res.setHeader("Cache-Control", "public, max-age=30");
+      if (finalStreams.length === 0) res.setHeader("Cache-Control", "public, max-age=15, s-maxage=30");
       return res.status(200).json({ streams: finalStreams });
     }
 
