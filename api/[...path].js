@@ -807,10 +807,14 @@ async function buildArabicMeta(type, id) {
     const k = await safeFetchJson(`${UPSTREAM_ADDONS.animeKitsu}/meta/${type}/${id}.json`);
     base = k?.meta || null;
   } else {
-    const [arRes, cineRes] = await Promise.all([
-      safeFetchJson(`${UPSTREAM_ADDONS.tmdbAddon}/meta/${type}/${id}.json`, {}, 2500),
-      safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/meta/${type}/${id}.json`)
-    ]);
+    const arP = safeFetchJson(`${UPSTREAM_ADDONS.tmdbAddon}/meta/${type}/${id}.json`, {}, 3000);
+    const cineP = safeFetchJson(`${UPSTREAM_ADDONS.cinemeta}/meta/${type}/${id}.json`, {}, 3500);
+    // نبدأ بأول مصدر يرد؛ والآخر نمنحه مهلة قصيرة فقط (كان الانتظار لأبطأ مصدر)
+    const first = await Promise.race([arP.then(v => ({ k: "ar", v })), cineP.then(v => ({ k: "cine", v }))]);
+    let arRes, cineRes;
+    if (first.k === "cine" && first.v) { cineRes = first.v; arRes = await withDeadline(arP, 700); }
+    else if (first.k === "ar" && first.v) { arRes = first.v; cineRes = await withDeadline(cineP, 1500); }
+    else { [arRes, cineRes] = await Promise.all([arP, cineP]); }
     arMeta = arRes?.meta || null;
     base = cineRes?.meta || arMeta;
   }
@@ -865,6 +869,7 @@ async function buildArabicMeta(type, id) {
   }
 
   let complete = true;
+  let plotFailed = false;
   const missing = [];
   for (const t of toTranslate) {
     const ar = cachedArabic(t.text);
@@ -873,22 +878,70 @@ async function buildArabicMeta(type, id) {
     else { meta.videos[t.idx].overview = ar; meta.videos[t.idx].description = ar; }
   }
 
-  // القصة العامة ننتظرها قليلاً (2.2 ثانية) لأنها أهم ما في الصفحة
+  // القصة العامة ننتظرها قليلاً (1.3 ثانية) لأنها أهم ما في الصفحة
   const plotJob = missing.find(t => t.kind === "plot");
   if (plotJob) {
-    const out = await translateToArabic(plotJob.text, Date.now() + 2200);
-    if (out && isTextArabic(out)) plot = out; else complete = false;
+    const out = await translateToArabic(plotJob.text, Date.now() + 1300);
+    if (out && isTextArabic(out)) plot = out; else { complete = false; plotFailed = true; }
   }
 
   // قصص الحلقات: تُترجم في الخلفية وتُخزَّن، وتظهر في الفتح التالي بلا انتظار
   const epJobs = missing.filter(t => t.kind === "ov");
   if (epJobs.length) {
     complete = false;
-    translateMany(epJobs.slice(0, 40).map(t => t.text), { limit: 4, budgetMs: 9000 }).catch(() => {});
+    translateMany(epJobs.map(t => t.text), { limit: 4, budgetMs: 9000 }).catch(() => {});
   }
 
   if (plot) applyPlot(meta, plot);
-  return { meta, complete };
+  return { meta, complete, plotFailed };
+}
+
+// يطبّق ترجمات الحلقات التي وصلت في الخلفية على نسخة مخزّنة؛ يرجع عدد ما بقي بلا ترجمة
+function reapplyEpisodeCache(meta) {
+  if (!Array.isArray(meta?.videos)) return 0;
+  let left = 0, budget = 60;
+  for (const v of meta.videos) {
+    const ov = v.overview || v.description;
+    if (!ov || isTextArabic(ov) || budget <= 0) continue;
+    budget--;
+    const ar = cachedArabic(ov);
+    if (ar) { v.overview = ar; v.description = ar; } else left++;
+  }
+  return left;
+}
+
+// مصدر واحد للتفاصيل: كاش + دمج الطلبات المتزامنة (Stremio يطلب الصفحة أحياناً مرتين)
+const metaBuilds = new Map();
+function getMetaPayload(type, id) {
+  const key = `meta_ar_v15_${type}_${id}`;
+  const hit = getFromCache(key);
+  if (hit) {
+    if (hit._partial && reapplyEpisodeCache(hit.meta) === 0) delete hit._partial;
+    return Promise.resolve({ payload: { meta: hit.meta }, partial: Boolean(hit._partial) });
+  }
+  if (metaBuilds.has(key)) return metaBuilds.get(key);
+  const job = (async () => {
+    const built = await buildArabicMeta(type, id);
+    if (!built) return { payload: { meta: null }, partial: true };
+    const payload = { meta: built.meta };
+    // فشل ترجمة القصة لا يُخزَّن حتى لا تبقى إنجليزية؛ ونقص الحلقات فقط يُخزَّن كنسخة جزئية
+    if (!built.plotFailed) saveToCache(key, built.complete ? payload : { ...payload, _partial: true });
+    return { payload, partial: !built.complete };
+  })().finally(() => metaBuilds.delete(key));
+  metaBuilds.set(key, job);
+  return job;
+}
+
+// تسخين: نجهّز تفاصيل أول عناصر الكتالوج في الخلفية فتفتح فوراً
+function warmMeta(type, ids) {
+  let n = 0;
+  for (const id of ids) {
+    if (n >= 4) break;
+    if (!/^tt/.test(String(id))) continue;
+    if (getFromCache(`meta_ar_v15_${type}_${id}`) || metaBuilds.has(`meta_ar_v15_${type}_${id}`)) continue;
+    n++;
+    getMetaPayload(type, id).catch(() => {});
+  }
 }
 
 // =========================================================================
@@ -1194,6 +1247,7 @@ export default async function handler(req, res) {
         if (stale) return res.status(200).json(stale);
       }
 
+      warmMeta(type, finalMetas.map(m => m.id));
       const payload = { metas: finalMetas };
       // لا نخزّن قائمة فيها قصة إنجليزية حتى لا تبقى 25 دقيقة (كان هذا سبب الخلط)
       if (finalMetas.length > 0 && complete) saveToCache(cacheKey, payload);
@@ -1210,17 +1264,9 @@ export default async function handler(req, res) {
       const type = parts[1] || "movie";
       const id = (parts[2] || "").replace(/\.json$/, "");
 
-      const cacheKey = `meta_ar_v15_${type}_${id}`;
-      const cachedMeta = getFromCache(cacheKey);
-      if (cachedMeta) return res.status(200).json(cachedMeta);
-
-      const built = await buildArabicMeta(type, id);
-      if (!built) return res.status(200).json({ meta: null });
-
-      const resultObj = { meta: built.meta };
-      if (built.complete) saveToCache(cacheKey, resultObj);
-      else res.setHeader("Cache-Control", "public, max-age=60, s-maxage=60");
-      return res.status(200).json(resultObj);
+      const { payload, partial } = await getMetaPayload(type, id);
+      if (partial) res.setHeader("Cache-Control", "public, max-age=30, s-maxage=120");
+      return res.status(200).json(payload);
     }
 
     // -----------------------------------------------------------------
