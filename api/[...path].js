@@ -274,7 +274,7 @@ function isTextArabic(text) {
   const letters = text.match(/\p{L}/gu);
   const arabic = text.match(/[\u0600-\u06FF]/g);
   if (!letters || !arabic) return false;
-  return arabic.length >= 4 && arabic.length / letters.length >= 0.5;
+  return arabic.length >= 4 && arabic.length / letters.length >= 0.35;
 }
 
 function normalizeAr(s) {
@@ -446,8 +446,8 @@ async function localizeCatalogList(items, type = "movie") {
     genre: Array.isArray(item.genre) ? localizeGenres(item.genre) : item.genre
   }));
 
-  // عناصر البانر العلوي (أول 8) تُترجم الآن بمهلة قصيرة؛ والباقي في الخلفية
-  const HERO = 8;
+  // عناصر البانر العلوي (أول 16) تُترجم الآن بمهلة قصيرة؛ والباقي في الخلفية
+  const HERO = 16;
   const heroTexts = [];
   const bgTexts = [];
   prepared.forEach((item, i) => {
@@ -456,11 +456,11 @@ async function localizeCatalogList(items, type = "movie") {
     const ar = cachedArabic(plot);
     if (ar) { applyPlot(item, ar); return; }
     if (i < HERO) heroTexts.push(plot);
-    else if (i < 24) bgTexts.push(plot);
+    else if (i < 30) bgTexts.push(plot);
   });
 
   if (heroTexts.length) {
-    await withDeadline(translateMany(heroTexts, { limit: 8, budgetMs: 1800 }), 2000);
+    await withDeadline(translateMany(heroTexts, { limit: 8, budgetMs: 2600 }), 2800);
     prepared.forEach((item, i) => {
       if (i >= HERO) return;
       const plot = pickPlot(item);
@@ -1063,7 +1063,7 @@ export default async function handler(req, res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "*");
-    res.setHeader("Cache-Control", "public, max-age=600, s-maxage=1800, stale-while-revalidate=86400");
+    res.setHeader("Cache-Control", "public, max-age=300, s-maxage=900, stale-while-revalidate=3600");
 
     if (req.method === "OPTIONS") {
       return res.status(200).end();
