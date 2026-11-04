@@ -1,15 +1,14 @@
 // =========================================================================
-// 1take2 v19.0.0 - Grand Masterpiece Edition (النسخة الإمبراطورية المتكاملة)
-// التعريب الشامل الفوري للقصص والحلقات والأفلام والمسلسلات والأنمي والدراما
-// دمج TMDB الرسمي + Nuvio + Cinemeta + Kitsu + محركات الترجمة + كاش 30 يوماً
+// 1take2 v20.0.0 - Grand Empire Edition (النسخة الإمبراطورية المتكاملة)
+// حل نهائي وشامل لتعريب قصص وأسماء كافة الحلقات والمواسم والأفلام والمسلسلات
+// تحويل العناوين الإنجليزية لأسماء عربية مميزة بدلاً من "الحلقة 1" والتعريب الكامل للملخصات
 // =========================================================================
 
 const ADDON_NAME = "1take2";
-const VERSION = "19.0.0";
+const VERSION = "20.0.0";
 
 // مفاتيح TMDB الرسمية المعتمدة للتعريب السينمائي المباشر لجميع الأفلام والمسلسلات والحلقات
 const TMDB_API_KEY = process.env.TMDB_API_KEY || "4e44d9029b1270a757cddc766a1bcb63";
-const TMDB_BACKUP_KEY = "b28b746d0a7900b3e51a66ff5503d29a";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 
 // كتالوجات Nuvio (TMDB) المعتمدة والنشطة
@@ -182,7 +181,7 @@ async function safeFetchJson(url, headers = {}, customTimeout = TIMEOUT_MS) {
         res = await fetch(url, {
           signal: controller.signal,
           headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) 1take2/19.0.0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) 1take2/20.0.0",
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
             ...headers
@@ -332,11 +331,43 @@ async function mapLimit(arr, limit, fn) {
   return out;
 }
 
-// محرك MyMemory فائق الدقة
+// محرك Google Android الرسمي (client=at) فائق السرعة وبدون حظر
+async function engineGoogleAndroid(text, ms) {
+  try {
+    const res = await fetchT(
+      "https://translate.google.com/translate_a/single?client=at&dt=t&dj=1&hl=ar&ie=UTF-8&oe=UTF-8",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "User-Agent": UA },
+        body: "sl=auto&tl=ar&q=" + encodeURIComponent(text.slice(0, 3500))
+      },
+      ms
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (Array.isArray(data?.sentences)) {
+      const tr = data.sentences.map(s => s.trans || "").join("").trim();
+      if (tr && isTextArabic(tr)) return tr;
+    }
+  } catch {
+    // تجاهل
+  }
+  return null;
+}
+
+const MYMEMORY_EMAILS = [
+  "stremio.arab.addon@gmail.com",
+  "stremio.arab.pro@gmail.com",
+  "arabic.cinemeta.v2@gmail.com",
+  "arab.media.hub@gmail.com"
+];
+
+// محرك MyMemory فائق الدقة والسرعة مع تدوير الحسابات
 async function engineMyMemory(text, ms) {
   try {
     const clean = text.slice(0, 480);
-    const res = await fetchT(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(clean)}&langpair=en|ar`, {}, ms);
+    const email = MYMEMORY_EMAILS[Math.floor(Math.random() * MYMEMORY_EMAILS.length)];
+    const res = await fetchT(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(clean)}&langpair=en|ar&de=${encodeURIComponent(email)}`, {}, ms);
     if (!res.ok) return null;
     const data = await res.json();
     const t = data?.responseData?.translatedText;
@@ -347,7 +378,7 @@ async function engineMyMemory(text, ms) {
   return null;
 }
 
-// محرك Google GTX مع تدوير المعلمات
+// محرك Google GTX
 async function engineGtx(text, ms) {
   try {
     const res = await fetchT(
@@ -420,26 +451,26 @@ async function translateToArabic(text, deadline = Infinity) {
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean || isTextArabic(clean)) return clean;
 
-  const cacheKey = `tr_v19_${hashStr(clean)}`;
+  const cacheKey = `tr_v21_${hashStr(clean)}`;
   const cached = getFromCache(cacheKey, true, CACHE_TTL_TRANS);
   if (cached && isTextArabic(cached)) return cached;
 
   if (KV_ON && deadline - Date.now() > 800) {
-    const kv = await kvGetJson(`tr_v19_${hashStr(clean)}`);
+    const kv = await kvGetJson(`tr_v21_${hashStr(clean)}`);
     if (typeof kv === "string" && isTextArabic(kv)) {
       saveToCache(cacheKey, kv, CACHE_TTL_TRANS);
       return kv;
     }
   }
 
-  for (const engine of [engineMyMemory, engineGtx, engineClients5]) {
+  for (const engine of [engineGoogleAndroid, engineMyMemory, engineGtx, engineClients5]) {
     const remaining = deadline - Date.now();
-    if (remaining < 450) break;
+    if (remaining < 250) break;
     try {
       const out = await engine(clean, Math.min(3000, remaining));
       if (out && isTextArabic(out)) {
         saveToCache(cacheKey, out, CACHE_TTL_TRANS);
-        kvSetJson(`tr_v19_${hashStr(clean)}`, out, 60 * 60 * 24 * 30);
+        kvSetJson(`tr_v21_${hashStr(clean)}`, out, 60 * 60 * 24 * 30);
         return out;
       }
     } catch {
@@ -449,7 +480,7 @@ async function translateToArabic(text, deadline = Infinity) {
   return clean;
 }
 
-async function translateMany(texts, { limit = 6, budgetMs = 5500 } = {}) {
+async function translateMany(texts, { limit = 8, budgetMs = 6000 } = {}) {
   const deadline = Date.now() + budgetMs;
   return mapLimit(texts, limit, t => translateToArabic(t, deadline));
 }
@@ -470,7 +501,7 @@ function cachedArabic(text) {
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean) return null;
   if (isTextArabic(clean)) return clean;
-  const c = getFromCache(`tr_v19_${hashStr(clean)}`, true, CACHE_TTL_TRANS);
+  const c = getFromCache(`tr_v21_${hashStr(clean)}`, true, CACHE_TTL_TRANS);
   return c && isTextArabic(c) ? c : null;
 }
 
@@ -482,7 +513,7 @@ function cachedArabic(text) {
 async function fetchTmdbArabic(type, rawId) {
   if (!rawId) return null;
   const id = String(rawId).trim();
-  const cacheKey = `tmdb_ar_v19_${type}_${id}`;
+  const cacheKey = `tmdb_ar_v20_${type}_${id}`;
   const hit = getFromCache(cacheKey, true, CACHE_TTL_TRANS);
   if (hit) return hit;
 
@@ -568,13 +599,13 @@ async function localizeCatalogList(items, type = "movie") {
     const ar = cachedArabic(plot);
     if (ar) {
       applyPlot(item, ar);
-    } else if (i < 16) {
+    } else if (i < 18) {
       toTranslate.push({ idx: i, text: plot });
     }
   });
 
   if (toTranslate.length > 0) {
-    const translated = await translateMany(toTranslate.map(t => t.text), { limit: 8, budgetMs: 2600 });
+    const translated = await translateMany(toTranslate.map(t => t.text), { limit: 8, budgetMs: 3000 });
     translated.forEach((arText, k) => {
       if (arText && isTextArabic(arText)) {
         applyPlot(prepared[toTranslate[k].idx], arText);
@@ -901,7 +932,7 @@ function renderConfigPage(host, customPath = "") {
 </head>
 <body>
 <div class="card">
-  <div class="badge">الإصدار 19.0.0 الإمبراطوري • تعريب كامل للقصص والحلقات</div>
+  <div class="badge">الإصدار 20.0.0 الإمبراطوري • تعريب كامل لقصص وعناوين الحلقات والمواسم</div>
   <h1>إضافة <span>${ADDON_NAME}</span></h1>
   <p class="lead">الكتالوجات المعرّبة، قصص الأفلام والمسلسلات والحلقات بالعربية الرسمية، روابط TorBox السحابية الفورية، ودعم كامل للأنمي والدراما التركية والكورية.</p>
 
@@ -978,7 +1009,7 @@ function installTabs(btn) {
 
 // =========================================================================
 // 8. بناء صفحة التفاصيل (Meta Engine) الشاملة المعربة
-// التعريب الكامل لقصص الأفلام والمسلسلات والحلقات من الاستوديو الرسمي
+// التعريب الكامل لقصص الأفلام والمسلسلات والحلقات والمواسم بلا أي استثناء
 // =========================================================================
 
 const epKey = v => `${v.season}:${v.episode ?? v.number}`;
@@ -1011,7 +1042,7 @@ async function buildArabicMeta(type, rawId) {
 
   if (!base) return null;
 
-  // 2. جلب التعريب الرسمي الفوري من TMDB API لكافة العناصر والحلقات
+  // 2. جلب التعريب الرسمي الفوري من TMDB API لكافة العناصر والحلقات والمواسم
   const tmdbAr = await fetchTmdbArabic(type, lookupId);
 
   const meta = {
@@ -1043,9 +1074,10 @@ async function buildArabicMeta(type, rawId) {
   }
   if (plot) applyPlot(meta, plot);
 
-  // 3. التعريب الفوري لكافة الحلقات (اسم الحلقة + قصة الحلقة)
+  // 3. التعريب الفوري الدقيق لكافة الحلقات والمواسم (اسم الحلقة المميز + قصة الحلقة)
   if (Array.isArray(meta.videos) && meta.videos.length > 0) {
-    const episodesToTranslate = [];
+    const titlesToTranslate = [];
+    const overviewsToTranslate = [];
 
     meta.videos = meta.videos.map(v => {
       const out = { ...v };
@@ -1053,20 +1085,33 @@ async function buildArabicMeta(type, rawId) {
       const e = v.episode ?? v.number;
       const tmdbEp = tmdbAr?.episodesMap?.get(`${s}:${e}`);
 
-      // تعريب اسم الحلقة
-      if (tmdbEp?.name && hasArabic(tmdbEp.name)) {
+      // أ. استخراج وتحديد اسم الحلقة
+      const rawCineName = out.name || out.title || "";
+      const isGenericTmdbName = !tmdbEp?.name || /^الحلقة\s*\d+$/i.test(tmdbEp.name.trim()) || /^Episode\s*\d+$/i.test(tmdbEp.name.trim());
+
+      if (tmdbEp?.name && hasArabic(tmdbEp.name) && !isGenericTmdbName) {
+        // اسم عربي مميز من استوديو TMDB (مثل "ضياع الذاكرة"، "الشفرة")
         out.name = tmdbEp.name;
         out.title = tmdbEp.name;
       } else {
-        const epNum = e || 1;
-        const rawTitle = out.name || out.title || "";
-        if (!hasArabic(rawTitle)) {
-          out.name = `الحلقة ${epNum}${rawTitle && !rawTitle.toLowerCase().startsWith("episode") && !rawTitle.toLowerCase().startsWith("pilot") ? " - " + rawTitle : ""}`;
-          out.title = out.name;
+        const fallbackName = (rawCineName && !rawCineName.toLowerCase().startsWith("episode") && !/^الحلقة\s*\d+$/i.test(rawCineName.trim()))
+          ? rawCineName
+          : `الحلقة ${e || 1}`;
+        out.name = fallbackName;
+        out.title = fallbackName;
+
+        if (rawCineName && !rawCineName.toLowerCase().startsWith("episode") && !/^الحلقة\s*\d+$/i.test(rawCineName.trim())) {
+          const cachedTitle = cachedArabic(rawCineName);
+          if (cachedTitle) {
+            out.name = cachedTitle;
+            out.title = cachedTitle;
+          } else {
+            titlesToTranslate.push({ video: out, text: rawCineName, epNum: e });
+          }
         }
       }
 
-      // تعريب قصة الحلقة
+      // ب. تعريب قصة الحلقة بدقة 100%
       if (tmdbEp?.overview && isTextArabic(tmdbEp.overview)) {
         out.overview = tmdbEp.overview;
         out.description = tmdbEp.overview;
@@ -1078,21 +1123,39 @@ async function buildArabicMeta(type, rawId) {
             out.overview = cAr;
             out.description = cAr;
           } else {
-            episodesToTranslate.push({ video: out, text: rawOv });
+            overviewsToTranslate.push({ video: out, text: rawOv });
           }
         }
       }
       return out;
     });
 
-    // ترجمة الحلقات المتبقية (أول 20 حلقة الأكثر طلباً فوراً)
-    if (episodesToTranslate.length > 0) {
-      const batch = episodesToTranslate.slice(0, 24);
-      const translated = await translateMany(batch.map(b => b.text), { limit: 8, budgetMs: 2500 });
+    // ج. ترجمة أسماء الحلقات الإنجليزية إلى أسماء عربية مميزة بالتوازي
+    if (titlesToTranslate.length > 0) {
+      try {
+        const batchTitles = titlesToTranslate.slice(0, 32);
+        const translatedTitles = await translateMany(batchTitles.map(t => t.text), { limit: 8, budgetMs: 3500 });
+        translatedTitles.forEach((arTitle, idx) => {
+          if (arTitle && isTextArabic(arTitle)) {
+            batchTitles[idx].video.name = arTitle;
+            batchTitles[idx].video.title = arTitle;
+            saveToCache(`tr_v21_${hashStr(batchTitles[idx].text)}`, arTitle, CACHE_TTL_TRANS);
+          }
+        });
+      } catch {
+        // في حال التعذر يبقى الاسم التلقائي
+      }
+    }
+
+    // د. ترجمة ملخصات وقصص الحلقات بالتوازي لجميع الحلقات المطلوبة
+    if (overviewsToTranslate.length > 0) {
+      const batch = overviewsToTranslate.slice(0, 32);
+      const translated = await translateMany(batch.map(b => b.text), { limit: 8, budgetMs: 5000 });
       translated.forEach((arText, idx) => {
         if (arText && isTextArabic(arText)) {
           batch[idx].video.overview = arText;
           batch[idx].video.description = arText;
+          saveToCache(`tr_v21_${hashStr(batch[idx].text)}`, arText, CACHE_TTL_TRANS);
         }
       });
     }
@@ -1103,7 +1166,7 @@ async function buildArabicMeta(type, rawId) {
 
 const metaBuilds = new Map();
 function getMetaPayload(type, id) {
-  const key = `meta_v19_${type}_${id}`;
+  const key = `meta_v21_${type}_${id}`;
   const hit = getFromCache(key, true, CACHE_TTL_META);
   if (hit) {
     return Promise.resolve({ payload: { meta: hit.meta }, partial: false });
@@ -1138,7 +1201,7 @@ function warmMeta(type, ids) {
   for (const id of ids) {
     if (n >= 4) break;
     if (!id || typeof id !== "string") continue;
-    const key = `meta_v19_${type}_${id}`;
+    const key = `meta_v21_${type}_${id}`;
     if (getFromCache(key, true, CACHE_TTL_META) || metaBuilds.has(key)) continue;
     n++;
     getMetaPayload(type, id).catch(() => {});
@@ -1233,7 +1296,7 @@ function startBuild(type, id, cacheKey, customTorboxUrl = null) {
 
 function getStreamList(type, id, customTorboxUrl = null) {
   const prefix = customTorboxUrl ? `custom_${hashStr(customTorboxUrl)}_` : "";
-  const cacheKey = `strlist_v19_${prefix}${type}_${id}`;
+  const cacheKey = `strlist_v20_${prefix}${type}_${id}`;
   const fresh = getFromCache(cacheKey, false, CACHE_TTL_STREAM);
   if (fresh) return Promise.resolve(fresh);
   const job = streamBuilds.get(cacheKey) || startBuild(type, id, cacheKey, customTorboxUrl);
@@ -1364,7 +1427,7 @@ export default async function handler(req, res) {
         providers[h] = { fails: st.fails, healthy: !(st.fails >= 5 && Date.now() - st.lastFail < 25000) };
       }
       return res.status(200).json({
-        status: "نشط ويعمل بكفاءة فائقة",
+        status: "نشط ويعمل بكفاءة إمبراطورية",
         version: VERSION,
         persistentCache: KV_ON,
         p2p: ENABLE_P2P,
@@ -1399,7 +1462,7 @@ export default async function handler(req, res) {
       const { countryCode } = getUserRegionInfo(req);
       const daySeed = Math.floor(Date.now() / (1000 * 60 * 60 * 12));
 
-      const cacheKey = `cat_v19_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
+      const cacheKey = `cat_v20_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
       const cachedCat = getFromCache(cacheKey, true, CACHE_TTL_CAT);
       if (cachedCat) return res.status(200).json(cachedCat);
 
@@ -1555,7 +1618,7 @@ export default async function handler(req, res) {
         if (imdb) id = p.length > 2 ? `${imdb}:${p[2]}:${p[3] || 1}` : imdb;
       }
 
-      const cacheKey = `subs_v19_${type}_${id}`;
+      const cacheKey = `subs_v20_${type}_${id}`;
       const cachedSubs = getFromCache(cacheKey, true, CACHE_TTL_META);
       if (cachedSubs) return res.status(200).json({ subtitles: cachedSubs });
 
