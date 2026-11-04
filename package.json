@@ -1,8 +1,10 @@
 {
-  "name": "nuvio-clean-torrentio",
-  "version": "1.0.0",
+  "name": "onetake2",
+  "version": "18.0.0",
+  "description": "1take2 Stremio Addon Ultimate Edition",
   "type": "module",
-  "dependencies": {
-    "node-fetch": "^3.3.2"
+  "main": "[...path].js",
+  "scripts": {
+    "start": "node [...path].js"
   }
 }
