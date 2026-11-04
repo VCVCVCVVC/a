@@ -446,17 +446,36 @@ async function localizeCatalogList(items, type = "movie") {
     genre: Array.isArray(item.genre) ? localizeGenres(item.genre) : item.genre
   }));
 
-  const background = [];
+  // عناصر البانر العلوي (أول 8) تُترجم الآن بمهلة قصيرة؛ والباقي في الخلفية
+  const HERO = 8;
+  const heroTexts = [];
+  const bgTexts = [];
   prepared.forEach((item, i) => {
     const plot = pickPlot(item);
     if (!plot) return;
     const ar = cachedArabic(plot);
-    if (ar) applyPlot(item, ar);
-    else if (i < 12) background.push(plot);
+    if (ar) { applyPlot(item, ar); return; }
+    if (i < HERO) heroTexts.push(plot);
+    else if (i < 24) bgTexts.push(plot);
   });
-  if (background.length) translateMany(background, { limit: 4, budgetMs: 6000 }).catch(() => {});
 
-  return { items: prepared, complete: true };
+  if (heroTexts.length) {
+    await withDeadline(translateMany(heroTexts, { limit: 8, budgetMs: 1800 }), 2000);
+    prepared.forEach((item, i) => {
+      if (i >= HERO) return;
+      const plot = pickPlot(item);
+      const ar = plot ? cachedArabic(plot) : null;
+      if (ar) applyPlot(item, ar);
+    });
+  }
+  if (bgTexts.length) translateMany(bgTexts, { limit: 4, budgetMs: 6000 }).catch(() => {});
+
+  // إن بقيت قصة بانر بالإنجليزية لا نخزّن القائمة طويلاً فتكتمل ترجمتها في الطلب التالي
+  const complete = prepared.slice(0, HERO).every(item => {
+    const p = pickPlot(item);
+    return !p || isTextArabic(p);
+  });
+  return { items: prepared, complete };
 }
 
 function parseSizeBytes(sizeStr) {
