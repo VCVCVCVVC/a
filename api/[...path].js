@@ -50,6 +50,11 @@ function nuvioCatalogs() {
   ];
 }
 
+// كاش دائم اختياري (Upstash Redis أو Vercel KV): يحفظ الترجمات والتفاصيل والكتالوجات بين إعادات تشغيل السيرفر
+const KV_URL = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || "").replace(/\/+$/, "");
+const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || "";
+const KV_ON = Boolean(KV_URL && KV_TOKEN);
+
 const ADDON_NAME = "1take2";
 const VERSION = "17.0.0";
 // يقبل رابط Torrentio مع manifest.json أو بدونه
@@ -383,6 +388,51 @@ async function engineMyMemory(text, ms) {
   return parts.join(" ").trim();
 }
 
+async function kvCmd(cmd, ms = 700) {
+  if (!KV_ON) return null;
+  try {
+    const res = await fetchT(KV_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${KV_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify(cmd)
+    }, ms);
+    if (!res.ok) return null;
+    const j = await res.json();
+    return j?.result ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function kvGetJson(key) {
+  const r = await kvCmd(["GET", `1t2:${key}`]);
+  if (typeof r !== "string") return null;
+  try { return JSON.parse(r); } catch { return null; }
+}
+
+async function kvSetJson(key, val, ttlSec) {
+  if (!KV_ON) return;
+  const body = JSON.stringify(val);
+  if (body.length > 700000) return;
+  await kvCmd(["SET", `1t2:${key}`, body, "EX", String(ttlSec)], 1500);
+}
+
+// ترجمات محفوظة في الكاش الدائم (طلب واحد MGET لكل القائمة)
+async function kvTranslations(texts) {
+  const none = texts.map(() => null);
+  if (!KV_ON || !texts.length) return none;
+  const cleans = texts.map(t => String(t || "").replace(/\s+/g, " ").trim());
+  const r = await kvCmd(["MGET", ...cleans.map(c => `1t2:tr_ar_v15_${hashStr(c)}`)], 900);
+  if (!Array.isArray(r)) return none;
+  return r.map((v, i) => {
+    if (typeof v !== "string") return null;
+    let o; try { o = JSON.parse(v); } catch { return null; }
+    if (typeof o !== "string" || !isTextArabic(o)) return null;
+    saveToCache(`tr_ar_v15_${hashStr(cleans[i])}`, o);
+    return o;
+  });
+}
+
 async function translateToArabic(text, deadline = Infinity) {
   if (!text || typeof text !== "string") return text;
   const clean = text.replace(/\s+/g, " ").trim();
@@ -392,6 +442,11 @@ async function translateToArabic(text, deadline = Infinity) {
   const cached = getFromCache(cacheKey, true);
   if (cached && isTextArabic(cached)) return cached;
 
+  if (KV_ON && deadline - Date.now() > 900) {
+    const kv = await kvGetJson(`tr_ar_v15_${hashStr(clean)}`);
+    if (typeof kv === "string" && isTextArabic(kv)) { saveToCache(cacheKey, kv); return kv; }
+  }
+
   for (const engine of [engineGtx, engineClients5, engineMyMemory]) {
     const remaining = deadline - Date.now();
     if (remaining < 600) break;
@@ -399,6 +454,7 @@ async function translateToArabic(text, deadline = Infinity) {
       const out = await engine(clean, Math.min(3500, remaining));
       if (out && isTextArabic(out)) {
         saveToCache(cacheKey, out);
+        kvSetJson(`tr_ar_v15_${hashStr(clean)}`, out, 60 * 60 * 24 * 30);
         return out;
       }
     } catch {
@@ -458,6 +514,18 @@ async function localizeCatalogList(items, type = "movie") {
     if (i < HERO) heroTexts.push(plot);
     else if (i < 30) bgTexts.push(plot);
   });
+
+  if (KV_ON && (heroTexts.length || bgTexts.length)) {
+    await kvTranslations([...heroTexts, ...bgTexts]);
+    prepared.forEach(item => {
+      const plot = pickPlot(item);
+      const ar = plot ? cachedArabic(plot) : null;
+      if (ar) applyPlot(item, ar);
+    });
+    for (const arr of [heroTexts, bgTexts]) {
+      for (let k = arr.length - 1; k >= 0; k--) if (cachedArabic(arr[k])) arr.splice(k, 1);
+    }
+  }
 
   if (heroTexts.length) {
     await withDeadline(translateMany(heroTexts, { limit: 8, budgetMs: 2600 }), 2800);
@@ -897,6 +965,17 @@ async function buildArabicMeta(type, id) {
     else { meta.videos[t.idx].overview = ar; meta.videos[t.idx].description = ar; }
   }
 
+  if (KV_ON && missing.length) {
+    const found = await kvTranslations(missing.map(t => t.text));
+    for (let k = missing.length - 1; k >= 0; k--) {
+      if (!found[k]) continue;
+      const t = missing[k];
+      if (t.kind === "plot") plot = found[k];
+      else { meta.videos[t.idx].overview = found[k]; meta.videos[t.idx].description = found[k]; }
+      missing.splice(k, 1);
+    }
+  }
+
   // القصة العامة ننتظرها قليلاً (1.3 ثانية) لأنها أهم ما في الصفحة
   const plotJob = missing.find(t => t.kind === "plot");
   if (plotJob) {
@@ -940,11 +1019,16 @@ function getMetaPayload(type, id) {
   }
   if (metaBuilds.has(key)) return metaBuilds.get(key);
   const job = (async () => {
+    if (KV_ON) {
+      const kv = await kvGetJson(`meta_${type}_${id}`);
+      if (kv?.meta) { saveToCache(key, kv); return { payload: { meta: kv.meta }, partial: false }; }
+    }
     const built = await buildArabicMeta(type, id);
     if (!built) return { payload: { meta: null }, partial: true };
     const payload = { meta: built.meta };
     // فشل ترجمة القصة لا يُخزَّن حتى لا تبقى إنجليزية؛ ونقص الحلقات فقط يُخزَّن كنسخة جزئية
     if (!built.plotFailed) saveToCache(key, built.complete ? payload : { ...payload, _partial: true });
+    if (built.complete) await withDeadline(kvSetJson(`meta_${type}_${id}`, payload, 60 * 60 * 6), 400);
     return { payload, partial: !built.complete };
   })().finally(() => metaBuilds.delete(key));
   metaBuilds.set(key, job);
@@ -1155,7 +1239,7 @@ export default async function handler(req, res) {
       res.setHeader("Cache-Control", "no-store");
       const providers = {};
       for (const [h, st] of healthMetrics) providers[h] = { fails: st.fails, healthy: !(st.fails >= 3 && Date.now() - st.lastFail < 60000) };
-      return res.status(200).json({ status: "ok", version: VERSION, cacheEntries: memoryCache.size, providers });
+      return res.status(200).json({ status: "ok", version: VERSION, persistentCache: KV_ON, p2p: ENABLE_P2P, cacheEntries: memoryCache.size, providers });
     }
 
     if (path === "" || path === "/") {
@@ -1172,7 +1256,10 @@ export default async function handler(req, res) {
       const parts = subPath.split("/").filter(Boolean);
       const type = parts[1] || "movie";
       const catalogId = (parts[2] || "").replace(/\.json$/, "");
-      const extraPart = parts[3] ? parts[3].replace(/\.json$/, "") : "";
+      // المسار الخام (قبل فك الترميز): وإلا ينكسر "Action & Adventure" و"Tom & Jerry"
+      const rawPathOnly = rawUrl.split("?")[0];
+      const rawCatParts = rawPathOnly.substring(Math.max(0, rawPathOnly.indexOf("/catalog/"))).split("/").filter(Boolean);
+      const extraPart = (rawCatParts[3] || parts[3] || "").replace(/\.json$/, "");
 
       const { countryCode } = getUserRegionInfo(req);
       const daySeed = Math.floor(Date.now() / (1000 * 60 * 60 * 12));
@@ -1180,6 +1267,11 @@ export default async function handler(req, res) {
       const cacheKey = `cat_ar_v15_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
       const cachedCat = getFromCache(cacheKey);
       if (cachedCat) return res.status(200).json(cachedCat);
+      const kvCatKey = `cat_${type}_${catalogId}_${countryCode}_${extraPart}`;
+      if (KV_ON) {
+        const kv = await kvGetJson(kvCatKey);
+        if (kv?.metas?.length) { saveToCache(cacheKey, kv); return res.status(200).json(kv); }
+      }
 
       // ---- بقية الكتالوجات ----
       const extraSuffix = extraPart ? `/${extraPart}.json` : ".json";
@@ -1269,7 +1361,10 @@ export default async function handler(req, res) {
       warmMeta(type, finalMetas.map(m => m.id));
       const payload = { metas: finalMetas };
       // لا نخزّن قائمة فيها قصة إنجليزية حتى لا تبقى 25 دقيقة (كان هذا سبب الخلط)
-      if (finalMetas.length > 0 && complete) saveToCache(cacheKey, payload);
+      if (finalMetas.length > 0 && complete) {
+        saveToCache(cacheKey, payload);
+        await withDeadline(kvSetJson(kvCatKey, payload, 60 * 20), 400);
+      }
       else res.setHeader("Cache-Control", "public, max-age=60, s-maxage=60");
       return res.status(200).json(payload);
     }
@@ -1303,7 +1398,11 @@ export default async function handler(req, res) {
 
       const sources = [UPSTREAM_ADDONS.opensubtitlesV3, UPSTREAM_ADDONS.subdl, UPSTREAM_ADDONS.yifysubs];
       const responses = await Promise.all(
-        sources.map(base => safeFetchJson(`${base}/subtitles/${type}/${id}.json`, {}, 4000))
+        sources.map((base, k) => {
+          const rawSub = rawUrl.split("?")[0];
+          const extraSub = k === 0 ? (rawSub.substring(Math.max(0, rawSub.indexOf("/subtitles/"))).split("/").filter(Boolean)[3] || "").replace(/\.json$/, "") : "";
+          return withDeadline(safeFetchJson(`${base}/subtitles/${type}/${id}${extraSub ? "/" + extraSub : ""}.json`, {}, 3000), 3200);
+        })
       );
 
       const isArabicLang = l => /^(ara|ar|arb|arabic|ar-[a-z]{2})$/i.test(String(l || "").trim());
