@@ -7,7 +7,8 @@
 // =========================================================================
 //
 // متغيرات البيئة (Environment Variables):
-//   ACCESS_KEY      (إجباري) مفتاح سري 12-64 حرفاً [A-Za-z0-9_-]  → الرابط: https://HOST/<ACCESS_KEY>/
+//   ACCESS_KEY      (اختياري، موصى به) مفتاح سري 12-64 حرفاً [A-Za-z0-9_-] → الرابط: https://HOST/<ACCESS_KEY>/
+//                    بدونه تعمل الإضافة مفتوحة على https://HOST/
 //   TMDB_API_KEY    (موصى به) مفتاحك الخاص من themoviedb.org (التعريب الرسمي + الكتالوجات)
 //   TORBOX_TOKEN    (اختياري) توكن TorBox الافتراضي لك أنت (لا يُعرض في أي صفحة)
 //   UPSTREAM_URL    (اختياري) رابط Torrentio كامل بدلاً من الافتراضي
@@ -27,7 +28,8 @@ const VERSION = "21.0.0";
 
 // ---- الخصوصية والحماية ----
 const ACCESS_KEY = (process.env.ACCESS_KEY || "").trim();
-const KEY_VALID = /^[A-Za-z0-9_-]{12,64}$/.test(ACCESS_KEY);
+const KEY_ON = Boolean(ACCESS_KEY); // بدون ACCESS_KEY تعمل الإضافة بشكل مفتوح
+const KEY_VALID = !KEY_ON || /^[A-Za-z0-9_-]{12,64}$/.test(ACCESS_KEY);
 const ENABLE_HEALTH = process.env.ENABLE_HEALTH === "1";
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*"; // Stremio Web يحتاج CORS؛ قيّده إن لم تستخدمه
 
@@ -1113,7 +1115,7 @@ var profile="tv";
 function $(i){return document.getElementById(i)}
 
 function path(){
-  var p="/"+K+"/", prov=$("prov").value, t=$("tok").value.replace(/[^a-zA-Z0-9_-]/g,"");
+  var p=K?"/"+K+"/":"/", prov=$("prov").value, t=$("tok").value.replace(/[^a-zA-Z0-9_-]/g,"");
   if(prov&&t)p+=prov+"="+t+"/";
   var c=[];
   if(profile==="tv")c.push("tv");
@@ -1837,12 +1839,12 @@ export default async function handler(req, res) {
       return res.status(404).send("Not found");
     };
     if (peekBlocked(ip)) { res.setHeader("Retry-After", "600"); res.setHeader("Cache-Control", "no-store"); return res.status(429).end(); }
-    if (!rawSegs[0] || !safeEq(safeDecode(rawSegs[0]), ACCESS_KEY)) {
+    if (KEY_ON && (!rawSegs[0] || !safeEq(safeDecode(rawSegs[0]), ACCESS_KEY))) {
       hit(failMap, ip, 12, 10 * 60 * 1000);
       return denied();
     }
 
-    const rawRest = rawSegs.slice(1);
+    const rawRest = KEY_ON ? rawSegs.slice(1) : rawSegs;
     const rest = rawRest.map(safeDecode);
 
     // ---- المعدّلات: ديبريد / خيارات / تبويب (بأي ترتيب) ----
@@ -2041,11 +2043,9 @@ if (isMain) {
   server.keepAliveTimeout = 65000;
   server.listen(PORT, HOST, () => {
     console.log(`\n${ADDON_NAME} v${VERSION} يعمل على المنفذ ${PORT}`);
-    if (KEY_VALID) {
-      console.log(`صفحة التثبيت:  http://localhost:${PORT}/<ACCESS_KEY>/`);
-    } else {
-      console.log(`⚠ ACCESS_KEY غير مضبوط: الخدمة مغلقة. اقتراح مفتاح: ACCESS_KEY=${randomBytes(18).toString("base64url")}`);
-    }
+    if (!KEY_ON) console.log(`صفحة التثبيت:  http://localhost:${PORT}/   (⚠ الوضع مفتوح: لا يوجد ACCESS_KEY)`);
+    else if (KEY_VALID) console.log(`صفحة التثبيت:  http://localhost:${PORT}/<ACCESS_KEY>/`);
+    else console.log(`⚠ ACCESS_KEY غير صالح (12-64 حرفاً A-Z a-z 0-9 _ -). اقتراح: ${randomBytes(18).toString("base64url")}`);
     if (!TMDB_API_KEY) console.log("ℹ TMDB_API_KEY غير مضبوط: التعريب الرسمي والكتالوجات التركية/الكورية/المصرية معطّلة.");
   });
 }
