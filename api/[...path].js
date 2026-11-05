@@ -1,40 +1,62 @@
 // =========================================================================
-// 1take2 v20.0.0 - Grand Empire Edition (النسخة الإمبراطورية المتكاملة)
-// حل نهائي وشامل لتعريب قصص وأسماء كافة الحلقات والمواسم والأفلام والمسلسلات
-// تحويل العناوين الإنجليزية لأسماء عربية مميزة بدلاً من "الحلقة 1" والتعريب الكامل للملخصات
+// 1take2 v21.0.0 - Private TV Edition (النسخة الخاصة والمحسّنة للتلفاز)
+// - خاص بالكامل: مفتاح وصول إجباري في الرابط (ACCESS_KEY) + لا أسرار داخل الكود
+// - سلس وخفيف على التلفاز: ملف تعريف TV، صور مصغّرة، ضغط gzip، ETag، فلترة الروابط الثقيلة
+// - مزايا جديدة: بحث عربي، كتالوجات مصرية/خليجية/الأحدث/الأعلى تقييماً، تقسيم/ترقيم الصفحات،
+//   خيارات (حد الجودة، حد الحجم، استبعاد Remux/AV1)، دعم عدة مزودي ديبريد، حماية من الإساءة
+// =========================================================================
+//
+// متغيرات البيئة (Environment Variables):
+//   ACCESS_KEY      (إجباري) مفتاح سري 12-64 حرفاً [A-Za-z0-9_-]  → الرابط: https://HOST/<ACCESS_KEY>/
+//   TMDB_API_KEY    (موصى به) مفتاحك الخاص من themoviedb.org (التعريب الرسمي + الكتالوجات)
+//   TORBOX_TOKEN    (اختياري) توكن TorBox الافتراضي لك أنت (لا يُعرض في أي صفحة)
+//   UPSTREAM_URL    (اختياري) رابط Torrentio كامل بدلاً من الافتراضي
+//   MYMEMORY_EMAIL  (اختياري) بريدك لرفع حد ترجمة MyMemory
+//   UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN (اختياري) كاش دائم
+//   ENABLE_P2P=0 لتعطيل روابط P2P  |  ENABLE_HEALTH=1 لتفعيل /health  |  ALLOWED_ORIGIN لتقييد CORS
 // =========================================================================
 
+import { timingSafeEqual, randomBytes } from "node:crypto";
+import zlib from "node:zlib";
+import http from "node:http";
+import { fileURLToPath } from "node:url";
+import { resolve as resolvePath } from "node:path";
+
 const ADDON_NAME = "1take2";
-const VERSION = "20.0.0";
+const VERSION = "21.0.0";
 
-// مفاتيح TMDB الرسمية المعتمدة للتعريب السينمائي المباشر لجميع الأفلام والمسلسلات والحلقات
-const TMDB_API_KEY = process.env.TMDB_API_KEY || "4e44d9029b1270a757cddc766a1bcb63";
+// ---- الخصوصية والحماية ----
+const ACCESS_KEY = (process.env.ACCESS_KEY || "").trim();
+const KEY_VALID = /^[A-Za-z0-9_-]{12,64}$/.test(ACCESS_KEY);
+const ENABLE_HEALTH = process.env.ENABLE_HEALTH === "1";
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*"; // Stremio Web يحتاج CORS؛ قيّده إن لم تستخدمه
+
+// ---- مفاتيح الخدمات (من البيئة فقط، لا تُكتب داخل الكود أبداً) ----
+const TMDB_API_KEY = (process.env.TMDB_API_KEY || "").trim();
 const TMDB_BASE = "https://api.themoviedb.org/3";
+const TMDB_IMG = "https://image.tmdb.org/t/p";
 
-// كتالوجات Nuvio (TMDB) المعتمدة والنشطة
 const NUVIO_URL = (process.env.NUVIO_URL || "https://catalog.nuvio.tv").replace(/\/manifest\.json$/i, "").replace(/\/+$/, "");
 
-// رابط Torrentio الافتراضي مع TorBox لتوفير بث فوري سحابي فائق السرعة
-const DEFAULT_TORBOX_URL = "https://torrentio.strem.fun/qualityfilter=scr,cam|torbox=3183a8fd-2d85-41fb-a58d-39c5737efae3";
-const UPSTREAM_URL = (process.env.UPSTREAM_URL || DEFAULT_TORBOX_URL).replace(/\/manifest\.json$/i, "").replace(/\/+$/, "");
+const TORRENTIO = "https://torrentio.strem.fun";
+const TORBOX_TOKEN = (process.env.TORBOX_TOKEN || "").replace(/[^a-zA-Z0-9_-]/g, "");
+const DEFAULT_UPSTREAM = `${TORRENTIO}/qualityfilter=scr,cam${TORBOX_TOKEN ? `|torbox=${TORBOX_TOKEN}` : ""}`;
+const UPSTREAM_URL = (process.env.UPSTREAM_URL || DEFAULT_UPSTREAM).replace(/\/manifest\.json$/i, "").replace(/\/+$/, "");
 
-// تفعيل روابط التورنت المباشرة P2P (اختياري - افتراضياً مفعلة مع أولوية الروابط الفورية)
 const ENABLE_P2P = process.env.ENABLE_P2P !== "0";
 
-// إعدادات الذاكرة المؤقتة (TTLs) محسوبة بدقة لمنع تكرار الاتصالات وتسريع الاستجابة
-const CACHE_TTL_STREAM = 30 * 60 * 1000;          // 30 دقيقة للروابط
-const CACHE_TTL_META = 4 * 60 * 60 * 1000;        // 4 ساعات للتفاصيل
-const CACHE_TTL_CAT = 60 * 60 * 1000;             // ساعة كاملة للكتالوجات
-const CACHE_TTL_TRANS = 30 * 24 * 60 * 60 * 1000; // 30 يوماً للترجمات (فورية بلا شبكة)
-const STALE_TTL = 24 * 60 * 60 * 1000;            // 24 ساعة للنسخ الاحتياطية (Stale-While-Revalidate)
+// ---- الكاش (TTLs) ----
+const CACHE_TTL_STREAM = 30 * 60 * 1000;
+const CACHE_TTL_META = 4 * 60 * 60 * 1000;
+const CACHE_TTL_CAT = 60 * 60 * 1000;
+const CACHE_TTL_TRANS = 30 * 24 * 60 * 60 * 1000;
+const STALE_TTL = 24 * 60 * 60 * 1000;
 const TIMEOUT_MS = 3800;
 
-// كاش دائم اختياري (Upstash Redis أو Vercel KV) لحفظ الترجمات بين إعادات التشغيل
 const KV_URL = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || "").replace(/\/+$/, "");
 const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || "";
 const KV_ON = Boolean(KV_URL && KV_TOKEN);
 
-// المزودات الحية المعتمدة عالية الاستقرار
 const UPSTREAM_ADDONS = {
   cinemeta: "https://v3-cinemeta.strem.io",
   nuvio: NUVIO_URL,
@@ -44,6 +66,47 @@ const UPSTREAM_ADDONS = {
   publicDomain: "https://caching.stremio.net/publicdomainmovies.now.sh",
   opensubtitlesV3: "https://opensubtitles-v3.strem.io"
 };
+
+// =========================================================================
+// 0. ملفات التعريف والخيارات (TV / موبايل / توفير بيانات)
+// =========================================================================
+
+const DEFAULT_OPTS = {
+  tv: false, lite: false,
+  maxRank: 0,          // 0 = بلا حد | 2=720p | 3=1080p | 4=4K
+  maxGB: 0,            // 0 = بلا حد
+  noRemux: false, noAv1: false, noEmoji: false,
+  maxStreams: 60,
+  catLimit: 45,        // عدد عناصر الكتالوج التي تُعرَّب
+  catTranslate: 18,    // أقصى عدد قصص تُترجم أثناء تحميل الكتالوج
+  catMax: 100,         // أقصى عدد عناصر في الكتالوج
+  warm: 4,             // تسخين الميتا في الخلفية
+  plotMax: 0, epPlotMax: 0,
+  subsMax: 25
+};
+
+const TV_DEFAULTS = {
+  tv: true, noEmoji: true, noAv1: true, maxGB: 35, maxStreams: 25,
+  catLimit: 30, catTranslate: 0, catMax: 40, warm: 0,
+  plotMax: 380, epPlotMax: 200, subsMax: 10
+};
+
+function buildOptions(flags = {}, tokens = []) {
+  const o = { ...DEFAULT_OPTS };
+  if (flags.tv || tokens.includes("tv")) Object.assign(o, TV_DEFAULTS);
+  if (flags.lite) o.lite = true;
+  for (const tk of tokens) {
+    let m;
+    if (tk === "lite") o.lite = true;
+    else if (tk === "noremux") o.noRemux = true;
+    else if (tk === "noav1") o.noAv1 = true;
+    else if (tk === "noemoji") o.noEmoji = true;
+    else if ((m = tk.match(/^m(4k|1080|720)$/))) o.maxRank = { "4k": 4, "1080": 3, "720": 2 }[m[1]];
+    else if ((m = tk.match(/^gb(\d{1,3})$/))) o.maxGB = Number(m[1]);
+    else if ((m = tk.match(/^n(\d{1,2})$/))) o.maxStreams = Math.max(3, Math.min(60, Number(m[1])));
+  }
+  return o;
+}
 
 // =========================================================================
 // 1. تصنيفات وقوائم Nuvio والكتالوجات العربية والأنمي
@@ -120,8 +183,8 @@ function getFromCache(key, allowStale = false, maxStaleMs = STALE_TTL) {
 
 function saveToCache(key, data, customTtl = null) {
   try {
-    if (memoryCache.size > 5000) {
-      const oldestKeys = Array.from(memoryCache.keys()).slice(0, 1200);
+    if (memoryCache.size > 2500) {
+      const oldestKeys = Array.from(memoryCache.keys()).slice(0, 800);
       oldestKeys.forEach(k => memoryCache.delete(k));
     }
     memoryCache.set(key, { data, time: Date.now(), customTtl });
@@ -162,7 +225,7 @@ function isProviderHealthy(url) {
 }
 
 async function safeFetchJson(url, headers = {}, customTimeout = TIMEOUT_MS) {
-  if (!isProviderHealthy(url)) return null;
+  if (!url || !isProviderHealthy(url)) return null;
 
   if (inflightRequests.has(url)) {
     return inflightRequests.get(url);
@@ -181,7 +244,7 @@ async function safeFetchJson(url, headers = {}, customTimeout = TIMEOUT_MS) {
         res = await fetch(url, {
           signal: controller.signal,
           headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) 1take2/20.0.0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) 1take2/21.0.0",
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
             ...headers
@@ -355,19 +418,14 @@ async function engineGoogleAndroid(text, ms) {
   return null;
 }
 
-const MYMEMORY_EMAILS = [
-  "stremio.arab.addon@gmail.com",
-  "stremio.arab.pro@gmail.com",
-  "arabic.cinemeta.v2@gmail.com",
-  "arab.media.hub@gmail.com"
-];
+const MYMEMORY_EMAIL = (process.env.MYMEMORY_EMAIL || "").trim();
 
 // محرك MyMemory فائق الدقة والسرعة مع تدوير الحسابات
 async function engineMyMemory(text, ms) {
   try {
     const clean = text.slice(0, 480);
-    const email = MYMEMORY_EMAILS[Math.floor(Math.random() * MYMEMORY_EMAILS.length)];
-    const res = await fetchT(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(clean)}&langpair=en|ar&de=${encodeURIComponent(email)}`, {}, ms);
+    const de = MYMEMORY_EMAIL ? `&de=${encodeURIComponent(MYMEMORY_EMAIL)}` : "";
+    const res = await fetchT(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(clean)}&langpair=en|ar${de}`, {}, ms);
     if (!res.ok) return null;
     const data = await res.json();
     const t = data?.responseData?.translatedText;
@@ -506,14 +564,78 @@ function cachedArabic(text) {
 }
 
 // =========================================================================
-// 4. المحرك الإمبراطوري للتعريب عبر TMDB API الرسمي (Direct Studio Arabic)
-// يضمن جلب العناوين والقصص والحلقات بالعربية الرسمية الصادرة من استوديوهات الإنتاج
+// 4. التعريب عبر TMDB + أدوات تخفيف الحمل على التلفاز
 // =========================================================================
 
-async function fetchTmdbArabic(type, rawId) {
-  if (!rawId) return null;
+function tmdbUrl(path, qs = "") {
+  if (!TMDB_API_KEY) return null;
+  return `${TMDB_BASE}${path}?${qs ? qs + "&" : ""}api_key=${TMDB_API_KEY}`;
+}
+
+function trimText(s, max) {
+  if (!max || typeof s !== "string" || s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const i = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("،"), cut.lastIndexOf(" "));
+  return (i > max * 0.6 ? cut.slice(0, i) : cut).replace(/[\s.،,]+$/, "") + "…";
+}
+
+// تصغير صور TMDB (أكبر توفير للتلفاز: الخلفيات "original" قد تتجاوز عدة ميغابايت)
+function shrinkImg(url, kind, o) {
+  if (typeof url !== "string") return url;
+  const m = url.match(/^(https:\/\/image\.tmdb\.org\/t\/p\/)(?:original|w\d+)(\/.+)$/);
+  if (!m) return url;
+  const size =
+    kind === "bg" ? (o.tv ? "w780" : "w1280") :
+    kind === "logo" ? "w300" :
+    kind === "thumb" ? (o.tv ? "w185" : "w300") :
+    (o.tv ? "w342" : "w500");
+  return `${m[1]}${size}${m[2]}`;
+}
+
+function shapeCatalogMeta(m, o) {
+  if (!m) return m;
+  const out = { ...m };
+  if (out.poster) out.poster = shrinkImg(out.poster, "poster", o);
+  if (out.background) out.background = shrinkImg(out.background, "bg", o);
+  if (out.logo) out.logo = shrinkImg(out.logo, "logo", o);
+  if (o.plotMax) {
+    const p = pickPlot(out);
+    if (p) applyPlot(out, trimText(p, o.plotMax));
+  }
+  if (o.tv) { delete out.trailers; delete out.trailerStreams; delete out.links; }
+  return out;
+}
+
+// نسخة مخففة من الميتا حسب الملف (لا تغيّر الكاش المشترك)
+function shapeMeta(meta, o) {
+  if (!meta) return meta;
+  const m = { ...meta };
+  if (m.poster) m.poster = shrinkImg(m.poster, "poster", o);
+  if (m.background) m.background = shrinkImg(m.background, "bg", o);
+  if (m.logo) m.logo = shrinkImg(m.logo, "logo", o);
+  if (o.plotMax) {
+    const p = pickPlot(m);
+    if (p) applyPlot(m, trimText(p, o.plotMax));
+  }
+  if (Array.isArray(m.videos)) {
+    m.videos = m.videos.map(v => {
+      const x = { ...v };
+      if (x.thumbnail) x.thumbnail = shrinkImg(x.thumbnail, "thumb", o);
+      if (o.epPlotMax) {
+        const t = trimText(x.overview || x.description, o.epPlotMax);
+        if (t) { x.overview = t; x.description = t; }
+      }
+      return x;
+    });
+  }
+  return m;
+}
+
+async function fetchTmdbArabic(type, rawId, seasons = []) {
+  if (!rawId || !TMDB_API_KEY) return null;
   const id = String(rawId).trim();
-  const cacheKey = `tmdb_ar_v20_${type}_${id}`;
+  const seasonKey = seasons.length ? `${seasons[0]}-${seasons[seasons.length - 1]}-${seasons.length}` : "0";
+  const cacheKey = `tmdb_ar_v21_${type}_${id}_${seasonKey}`;
   const hit = getFromCache(cacheKey, true, CACHE_TTL_TRANS);
   if (hit) return hit;
 
@@ -524,23 +646,16 @@ async function fetchTmdbArabic(type, rawId) {
 
     if (id.startsWith("tmdb:")) {
       tmdbId = id.split(":")[1];
-      const res = await safeFetchJson(`${TMDB_BASE}/${tmdbType}/${tmdbId}?language=ar-SA&api_key=${TMDB_API_KEY}`, {}, 3200);
-      mainData = res;
-    } else if (id.startsWith("tt")) {
-      const findRes = await safeFetchJson(`${TMDB_BASE}/find/${id}?external_source=imdb_id&language=ar-SA&api_key=${TMDB_API_KEY}`, {}, 3200);
-      if (findRes) {
-        if (findRes.movie_results?.length) {
-          mainData = findRes.movie_results[0];
-          tmdbType = "movie";
-          tmdbId = mainData.id;
-        } else if (findRes.tv_results?.length) {
-          mainData = findRes.tv_results[0];
-          tmdbType = "tv";
-          tmdbId = mainData.id;
-        }
+      if (!/^\d+$/.test(tmdbId || "")) return null;
+      mainData = await safeFetchJson(tmdbUrl(`/${tmdbType}/${tmdbId}`, "language=ar-SA"), {}, 3200);
+    } else if (/^tt\d+$/.test(id)) {
+      const findRes = await safeFetchJson(tmdbUrl(`/find/${id}`, "external_source=imdb_id&language=ar-SA"), {}, 3200);
+      if (findRes?.movie_results?.length) {
+        mainData = findRes.movie_results[0]; tmdbType = "movie"; tmdbId = mainData.id;
+      } else if (findRes?.tv_results?.length) {
+        mainData = findRes.tv_results[0]; tmdbType = "tv"; tmdbId = mainData.id;
       }
     }
-
     if (!mainData) return null;
 
     const result = {
@@ -550,25 +665,21 @@ async function fetchTmdbArabic(type, rawId) {
       episodesMap: new Map()
     };
 
-    // جلب كافة مواسم وحلقات المسلسلات بالعربية الرسمية بطلب مدمج فائق السرعة
-    if (tmdbType === "tv" && tmdbId) {
-      const appendSeasons = Array.from({ length: 8 }, (_, i) => `season/${i + 1}`).join(",");
-      const tvFull = await safeFetchJson(
-        `${TMDB_BASE}/tv/${tmdbId}?language=ar-SA&append_to_response=${appendSeasons}&api_key=${TMDB_API_KEY}`,
-        {},
-        3500
-      );
-      if (tvFull) {
+    // نجلب فقط المواسم الموجودة فعلاً في الميتا (بدون حد 8 مواسم) على دفعات ≤ 18 (حد TMDB = 20)
+    if (tmdbType === "tv" && tmdbId && seasons.length) {
+      const chunks = [];
+      for (let i = 0; i < seasons.length; i += 18) chunks.push(seasons.slice(i, i + 18));
+      const parts = await Promise.all(chunks.map(ch =>
+        safeFetchJson(tmdbUrl(`/tv/${tmdbId}`, `language=ar-SA&append_to_response=${ch.map(s => `season/${s}`).join(",")}`), {}, 4000)
+      ));
+      for (const tvFull of parts) {
+        if (!tvFull) continue;
         if (!result.overview && tvFull.overview) result.overview = tvFull.overview;
-        for (let s = 1; s <= 8; s++) {
-          const seasonData = tvFull[`season/${s}`];
-          if (seasonData?.episodes) {
-            for (const ep of seasonData.episodes) {
-              result.episodesMap.set(`${s}:${ep.episode_number}`, {
-                name: ep.name,
-                overview: ep.overview
-              });
-            }
+        for (const key of Object.keys(tvFull)) {
+          if (!key.startsWith("season/")) continue;
+          const s = Number(key.slice(7));
+          for (const ep of (tvFull[key]?.episodes || [])) {
+            result.episodesMap.set(`${s}:${ep.episode_number}`, { name: ep.name, overview: ep.overview });
           }
         }
       }
@@ -581,8 +692,8 @@ async function fetchTmdbArabic(type, rawId) {
   }
 }
 
-// تعريب عناصر الكتالوج مع دعم القصص والعناوين المباشرة
-async function localizeCatalogList(items, type = "movie") {
+// تعريب عناصر الكتالوج (الترجمة محدودة في وضع التلفاز لتسريع التحميل)
+async function localizeCatalogList(items, type = "movie", o = DEFAULT_OPTS) {
   if (!Array.isArray(items) || items.length === 0) return { items: [], complete: true };
 
   const prepared = items.map(item => ({
@@ -597,23 +708,18 @@ async function localizeCatalogList(items, type = "movie") {
     const plot = pickPlot(item);
     if (!plot) return;
     const ar = cachedArabic(plot);
-    if (ar) {
-      applyPlot(item, ar);
-    } else if (i < 18) {
-      toTranslate.push({ idx: i, text: plot });
-    }
+    if (ar) applyPlot(item, ar);
+    else if (i < o.catTranslate) toTranslate.push({ idx: i, text: plot });
   });
 
   if (toTranslate.length > 0) {
     const translated = await translateMany(toTranslate.map(t => t.text), { limit: 8, budgetMs: 3000 });
     translated.forEach((arText, k) => {
-      if (arText && isTextArabic(arText)) {
-        applyPlot(prepared[toTranslate[k].idx], arText);
-      }
+      if (arText && isTextArabic(arText)) applyPlot(prepared[toTranslate[k].idx], arText);
     });
   }
 
-  return { items: prepared, complete: true };
+  return { items: prepared.map(m => shapeCatalogMeta(m, o)), complete: true };
 }
 
 // =========================================================================
@@ -631,7 +737,7 @@ async function resolveTmdbToImdb(tmdbId, type = "movie") {
   try {
     const pureNum = reqId.replace("tmdb:", "");
     const extType = (type === "series" || type === "tv" || type === "anime") ? "tv" : "movie";
-    const ext = await safeFetchJson(`${TMDB_BASE}/${extType}/${pureNum}/external_ids?api_key=${TMDB_API_KEY}`, {}, 2800);
+    const ext = await safeFetchJson(tmdbUrl(`/${extType}/${pureNum}/external_ids`), {}, 2800);
     if (ext?.imdb_id && /^tt\d+/i.test(ext.imdb_id)) {
       idMapCache.set(cacheKey, ext.imdb_id);
       saveToCache(cacheKey, ext.imdb_id, CACHE_TTL_TRANS);
@@ -864,7 +970,13 @@ function cleanAndFormatStream(stream) {
       _hdr: Boolean(hdr),
       _ar: audio.hasArabic,
       _status: status,
-      _hash: getCanonicalKey(stream)
+      _hash: getCanonicalKey(stream),
+      _rank: resLabel === "8K" ? 5 : resLabel === "4K" ? 4 : resLabel === "2K" ? 3.5 : resLabel === "1080p" ? 3 : resLabel === "720p" ? 2 : 1,
+      _bytes: sizeBytes,
+      _remux: source === "Remux",
+      _av1: videoCodec === "AV1",
+      _audioLabel: audio.label,
+      _tagParts: [source, hdr, videoCodec, audioCodec, sizeMatch ? sizeMatch[1].replace(/\s+/g, "") : ""].filter(Boolean)
     };
 
     if (stream.url) cleanStream.url = stream.url;
@@ -887,121 +999,182 @@ function cleanAndFormatStream(stream) {
     return null;
   }
 }
-
 // =========================================================================
-// 7. صفحة التثبيت التفاعلية العربية (Responsive Modern Arabic Web UI)
+// 7. صفحة التثبيت الخاصة (تعمل فقط بعد إدخال المفتاح في الرابط)
+// - CSP صارم بـ nonce، لا موارد خارجية، لا أزرار inline، لا أسرار في المصدر
+// - مناسبة للريموت: أزرار كبيرة وتركيز واضح
 // =========================================================================
 
-function renderConfigPage(host, customPath = "") {
-  const prefix = customPath ? `${customPath}/` : "";
-  const tile = (k, accent) =>
-    `<a class="tile${accent ? " accent" : ""}" href="stremio://${host}/${prefix}${k}/manifest.json"><b>${TABS[k].label}</b><span>${TABS[k].desc}</span></a>`;
+function jsStr(v) {
+  return JSON.stringify(String(v)).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
+}
 
+function renderConfigPage(host, key, nonce) {
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${ADDON_NAME} - إضافة الترفيه الإمبراطورية المتكاملة</title>
-<style>
-  :root{--gold:#e5b53a;--gold-glow:rgba(229,181,58,.25);--bg:#07070a;--card:#101016;--card-border:rgba(255,255,255,.08);--text:#e8e8ee;--sub:#9696a5}
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:radial-gradient(circle at top, #141420 0%, var(--bg) 100%);color:var(--text);font-family:"Segoe UI",system-ui,-apple-system,sans-serif;line-height:1.6}
-  .card{width:100%;max-width:640px;background:var(--card);border:1px solid var(--card-border);border-radius:24px;padding:34px 30px;box-shadow:0 20px 40px rgba(0,0,0,.6)}
-  .badge{display:inline-block;padding:5px 14px;background:var(--gold-glow);color:var(--gold);border-radius:20px;font-size:12.5px;font-weight:700;margin-bottom:12px}
-  h1{font-size:32px;color:#fff;margin-bottom:6px;font-weight:800;letter-spacing:-.5px}
-  h1 span{color:var(--gold)}
-  p.lead{color:var(--sub);font-size:14.5px;margin-bottom:24px}
-  .section-title{font-size:16px;color:var(--gold);margin:24px 0 10px;display:flex;align-items:center;gap:8px}
-  .input-box{margin-bottom:16px}
-  .input-box label{display:block;font-size:13px;color:var(--sub);margin-bottom:6px}
-  .input-box input{width:100%;padding:13px 16px;background:#181822;border:1px solid var(--card-border);border-radius:12px;color:#fff;font-size:14px;outline:none;transition:border-color .2s}
-  .input-box input:focus{border-color:var(--gold)}
-  .btn{display:block;width:100%;padding:14px;border-radius:14px;text-align:center;font-weight:700;font-size:15px;text-decoration:none;cursor:pointer;border:0;transition:all .2s;font-family:inherit}
-  .btn-gold{background:var(--gold);color:#08080b}
-  .btn-gold:hover{transform:translateY(-2px);box-shadow:0 8px 20px var(--gold-glow)}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:12px}
-  .tile{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px 10px;border:1px solid var(--card-border);border-radius:14px;text-decoration:none;color:#fff;background:#15151e;text-align:center;transition:all .2s}
-  .tile b{font-size:18px;margin-bottom:4px}.tile span{font-size:11px;color:var(--sub)}
-  .tile.accent{border-color:rgba(229,181,58,.4)}.tile.accent b{color:var(--gold)}
-  .tile:hover{transform:translateY(-2px);background:#1d1d2b;border-color:var(--gold)}
-  .info-box{margin-top:20px;padding:14px 16px;border-radius:12px;background:#17151e;border:1px solid rgba(229,181,58,.2);font-size:13px;color:#e2d9c4}
-  .footer-btn{margin-top:14px;background:#181824;color:#bbb;border:1px solid var(--card-border)}
-  .footer-btn:hover{background:#222232;color:#fff}
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="referrer" content="no-referrer">
+<title>${ADDON_NAME}</title>
+<style nonce="${nonce}">
+:root{--gold:#e5b53a;--bg:#07070a;--card:#101016;--line:rgba(255,255,255,.1);--text:#ececf2;--sub:#a0a0b0;color-scheme:dark}
+*{box-sizing:border-box;margin:0;padding:0}
+html{font-size:17px}
+@media(min-width:1100px){html{font-size:20px}}
+body{min-height:100vh;display:flex;justify-content:center;padding:24px 14px;background:radial-gradient(circle at top,#15151f,var(--bg));color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;line-height:1.6;-webkit-user-select:none;user-select:none}
+input,select{-webkit-user-select:text;user-select:text}
+.card{width:100%;max-width:720px;height:fit-content;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:28px 24px}
+.badge{display:inline-block;padding:4px 12px;background:rgba(229,181,58,.15);color:var(--gold);border-radius:20px;font-size:.72rem;font-weight:700}
+h1{font-size:1.9rem;margin:8px 0 2px}h1 span{color:var(--gold)}
+.lead{color:var(--sub);font-size:.85rem;margin-bottom:6px}
+h2{font-size:1rem;color:var(--gold);margin:24px 0 10px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.opt,.tile,.btn{display:block;width:100%;padding:14px 12px;border-radius:14px;border:2px solid var(--line);background:#16161f;color:#fff;text-align:center;text-decoration:none;font:inherit;font-weight:700;cursor:pointer}
+.opt small,.tile small{display:block;font-weight:400;font-size:.7rem;color:var(--sub);margin-top:2px}
+.opt[aria-pressed=true]{border-color:var(--gold);background:#221d0e;color:var(--gold)}
+.btn-gold{background:var(--gold);color:#09090c;border-color:var(--gold);margin-top:14px}
+.btn-dark{margin-top:10px;background:#181824;color:#ccc}
+.tile{color:var(--gold)}
+label.l{display:block;font-size:.78rem;color:var(--sub);margin:12px 0 6px}
+input[type=password],select{width:100%;padding:12px 14px;border-radius:12px;border:2px solid var(--line);background:#181822;color:#fff;font:inherit;outline:none}
+.chk{display:flex;gap:10px;align-items:center;padding:8px 2px;font-size:.88rem}
+.chk input{width:22px;height:22px;accent-color:var(--gold)}
+:focus-visible{outline:4px solid var(--gold);outline-offset:2px}
+.note{margin-top:20px;padding:12px 14px;border-radius:12px;background:#17151e;border:1px solid rgba(229,181,58,.25);font-size:.8rem;color:#e2d9c4}
+#out{direction:ltr;text-align:left;word-break:break-all;font-size:.68rem;color:var(--sub);margin-top:10px}
 </style>
 </head>
 <body>
-<div class="card">
-  <div class="badge">الإصدار 20.0.0 الإمبراطوري • تعريب كامل لقصص وعناوين الحلقات والمواسم</div>
+<main class="card">
+  <span class="badge">v${VERSION} • نسخة خاصة</span>
   <h1>إضافة <span>${ADDON_NAME}</span></h1>
-  <p class="lead">الكتالوجات المعرّبة، قصص الأفلام والمسلسلات والحلقات بالعربية الرسمية، روابط TorBox السحابية الفورية، ودعم كامل للأنمي والدراما التركية والكورية.</p>
+  <p class="lead">اختر جهازك وخياراتك ثم ثبّت الإضافة. الرابط الناتج يحمل مفتاحك الخاص — لا تشاركه.</p>
 
-  <div class="input-box">
-    <label for="tbToken">مفتاح TorBox أو Real-Debrid الخاص بك (اختياري):</label>
-    <input type="text" id="tbToken" placeholder="اتركه فارغاً لاستخدام السيرفر السحابي الافتراضي الفوري" oninput="updateLinks()">
+  <h2>1. الجهاز</h2>
+  <div class="row">
+    <button class="opt" data-profile="tv" aria-pressed="true" id="firstFocus">تلفاز<small>خفيف وسلس • صور أصغر • روابط أخف</small></button>
+    <button class="opt" data-profile="mobile" aria-pressed="false">موبايل / كمبيوتر<small>كل الكتالوجات والمزايا</small></button>
+    <button class="opt" data-profile="saver" aria-pressed="false">توفير بيانات<small>حد 720p • قائمة أقصر</small></button>
   </div>
 
-  <div class="section-title">1. التثبيت الشامل الكامل (موصى به)</div>
-  <a class="btn btn-gold" id="mainInstall" href="stremio://${host}/${prefix}manifest.json">تثبيت ${ADDON_NAME} في Stremio</a>
+  <h2>2. حساب الديبريد (اختياري)</h2>
+  <label class="l" for="prov">المزود</label>
+  <select id="prov">
+    <option value="">الخادم الافتراضي (ضبط الخادم)</option>
+    <option value="torbox">TorBox</option>
+    <option value="realdebrid">Real-Debrid</option>
+    <option value="alldebrid">AllDebrid</option>
+    <option value="premiumize">Premiumize</option>
+    <option value="debridlink">Debrid-Link</option>
+  </select>
+  <label class="l" for="tok">المفتاح / التوكن</label>
+  <input type="password" id="tok" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="يبقى داخل الرابط فقط ولا يُخزَّن في الخادم">
 
-  <div class="section-title">2. تبويبات ومربعات الفلترة المخصصة</div>
-  <div class="grid">
-    ${tile("4k", true)}${tile("1080p", true)}${tile("hdr", true)}
-    ${tile("720p")}${tile("arabic", true)}${tile("cached")}
-  </div>
-  <button class="btn footer-btn" style="margin-top:12px" onclick="installTabs(this)">تثبيت كل المربعات بالتتابع في Stremio</button>
+  <h2>3. الجودة والحجم</h2>
+  <label class="l" for="maxq">أعلى جودة</label>
+  <select id="maxq">
+    <option value="">بدون حد</option>
+    <option value="m4k">حتى 4K</option>
+    <option value="m1080">حتى 1080p</option>
+    <option value="m720">حتى 720p</option>
+  </select>
+  <label class="l" for="maxgb">أقصى حجم للملف</label>
+  <select id="maxgb">
+    <option value="">افتراضي الجهاز</option>
+    <option value="gb8">8 جيجا</option>
+    <option value="gb15">15 جيجا</option>
+    <option value="gb25">25 جيجا</option>
+    <option value="gb40">40 جيجا</option>
+    <option value="gb0">بدون حد</option>
+  </select>
+  <label class="chk"><input type="checkbox" id="noremux"> استبعاد Remux الضخم</label>
+  <label class="chk"><input type="checkbox" id="noav1" checked> استبعاد AV1 (أغلب التلفزيونات لا تفكّه)</label>
+  <label class="chk"><input type="checkbox" id="noemoji" checked> إخفاء الإيموجي من أسماء الروابط</label>
+  <label class="chk"><input type="checkbox" id="lite"> بدون روابط بث (استخدام إضافة بث أخرى)</label>
 
-  <div class="info-box">
-    🌟 <b>المزايا المحدثة:</b> تعريب فوري لقصص الأفلام والمسلسلات مع تفاصيل الحلقات بالعربية، وربط تلقائي لسيرفرات البث لجميع أعمال TMDB و IMDb.
-  </div>
+  <h2>4. التثبيت</h2>
+  <a class="btn btn-gold" id="install" href="#">تثبيت ${ADDON_NAME} في Stremio</a>
+  <button class="btn btn-dark" id="copy" type="button">نسخ رابط المانفيست</button>
+  <div id="out"></div>
 
-  <button class="btn footer-btn" onclick="copyManifest()">نسخ رابط المانفيست المباشر</button>
-</div>
-<script>
-var baseHost = "${host}";
-var tabs = ${JSON.stringify(TAB_ORDER)};
+  <h2>5. تبويبات الجودة (اختياري)</h2>
+  <div class="row" id="tabs"></div>
 
-function getCleanToken() {
-  return document.getElementById("tbToken").value.trim().replace(/[^a-zA-Z0-9_-]/g, "");
+  <div class="note">للتلفاز: اضغط «نسخ» وافتح الرابط من هاتفك لتثبيته على Stremio عبر نفس الحساب، أو اكتب الرابط يدوياً في خانة إضافة مجتمعية. لا تشارك الرابط مع أحد.</div>
+</main>
+<script nonce="${nonce}">
+(function(){
+var H=${jsStr(host)}, K=${jsStr(key)};
+var secure=location.protocol==="https:";
+var TABS=[["4k","4K"],["1080p","1080p"],["hdr","HDR"],["720p","720p"],["arabic","صوت عربي"],["cached","فوري سحابي"]];
+var profile="tv";
+function $(i){return document.getElementById(i)}
+
+function path(){
+  var p="/"+K+"/", prov=$("prov").value, t=$("tok").value.replace(/[^a-zA-Z0-9_-]/g,"");
+  if(prov&&t)p+=prov+"="+t+"/";
+  var c=[];
+  if(profile==="tv")c.push("tv");
+  if(profile==="saver")c.push("m720","n15");
+  if($("maxq").value)c.push($("maxq").value);
+  if($("maxgb").value)c.push($("maxgb").value);
+  if($("noremux").checked)c.push("noremux");
+  if($("noav1").checked)c.push("noav1");
+  if($("noemoji").checked)c.push("noemoji");
+  if($("lite").checked)c.push("lite");
+  if(c.length)p+="cfg="+c.join(".")+"/";
+  return p;
+}
+function link(tab){return H+path()+(tab?tab+"/":"")+"manifest.json"}
+
+function refresh(){
+  var u=link();
+  $("out").textContent="https://"+u;
+  $("install").href=secure?"stremio://"+u:"#";
+  var ts=document.querySelectorAll("[data-tab]");
+  for(var i=0;i<ts.length;i++)ts[i].href=secure?"stremio://"+link(ts[i].getAttribute("data-tab")):"#";
+}
+function fail(){window.prompt("انسخ الرابط:","https://"+link())}
+function copy(){
+  var t="https://"+link();
+  if(navigator.clipboard&&window.isSecureContext){
+    navigator.clipboard.writeText(t).then(function(){$("copy").textContent="تم النسخ ✓"},fail);
+  }else fail();
 }
 
-function updateLinks() {
-  var t = getCleanToken();
-  var p = t ? "torbox=" + t + "/" : "";
-  document.getElementById("mainInstall").href = "stremio://" + baseHost + "/" + p + "manifest.json";
-  document.querySelectorAll(".tile").forEach(function(el) {
-    var rawText = el.querySelector("b").innerText;
-    var tabKey = "all";
-    if (rawText === "4K") tabKey = "4k";
-    else if (rawText === "1080p") tabKey = "1080p";
-    else if (rawText === "HDR") tabKey = "hdr";
-    else if (rawText === "720p") tabKey = "720p";
-    else if (rawText.indexOf("عربي") >= 0) tabKey = "arabic";
-    else if (rawText.indexOf("فوري") >= 0) tabKey = "cached";
-    el.href = "stremio://" + baseHost + "/" + p + tabKey + "/manifest.json";
-  });
-}
+var tabsBox=$("tabs");
+TABS.forEach(function(t){
+  var a=document.createElement("a");
+  a.className="tile";a.setAttribute("data-tab",t[0]);a.href="#";a.textContent=t[1];
+  tabsBox.appendChild(a);
+});
 
-function copyManifest() {
-  var t = getCleanToken();
-  var p = t ? "torbox=" + t + "/" : "";
-  navigator.clipboard.writeText("https://" + baseHost + "/" + p + "manifest.json");
-  alert("تم نسخ رابط الإضافة بنجاح! الصقه في خانة البحث في تطبيق Stremio.");
-}
+var btns=document.querySelectorAll("[data-profile]");
+for(var i=0;i<btns.length;i++)btns[i].addEventListener("click",function(){
+  profile=this.getAttribute("data-profile");
+  for(var j=0;j<btns.length;j++)btns[j].setAttribute("aria-pressed",btns[j]===this?"true":"false");
+  $("noav1").checked=$("noemoji").checked=(profile==="tv");
+  refresh();
+});
+["prov","tok","maxq","maxgb","noremux","noav1","noemoji","lite"].forEach(function(id){
+  $(id).addEventListener("input",refresh);$(id).addEventListener("change",refresh);
+});
+$("copy").addEventListener("click",copy);
+$("install").addEventListener("click",function(e){if(!secure){e.preventDefault();copy()}});
+tabsBox.addEventListener("click",function(e){if(!secure){e.preventDefault();window.prompt("انسخ الرابط:","https://"+link(e.target.getAttribute("data-tab")))}});
+refresh();
+try{$("firstFocus").focus()}catch(e){}
 
-function installTabs(btn) {
-  var t = getCleanToken();
-  var p = t ? "torbox=" + t + "/" : "";
-  var idx = 0;
-  btn.disabled = true;
-  function next() {
-    if (idx >= tabs.length) { btn.innerText = "تم إرسال كافة التبويبات"; btn.disabled = false; return; }
-    btn.innerText = "تثبيت " + (idx + 1) + "/" + tabs.length + " (" + tabs[idx] + ") - أكد في Stremio...";
-    location.href = "stremio://" + baseHost + "/" + p + tabs[idx++] + "/manifest.json";
-    setTimeout(next, 3200);
-  }
-  next();
-}
+// حماية خفيفة ضد الفحص العابر (رادع فقط؛ الأمان الحقيقي في مفتاح الوصول من جهة الخادم)
+document.addEventListener("contextmenu",function(e){e.preventDefault()});
+document.addEventListener("dragstart",function(e){e.preventDefault()});
+document.addEventListener("keydown",function(e){
+  var k=(e.key||"").toLowerCase();
+  if(e.key==="F12"||(e.ctrlKey&&e.shiftKey&&(k==="i"||k==="j"||k==="c"))||(e.ctrlKey&&(k==="u"||k==="s"||k==="p"))||(e.metaKey&&e.altKey&&(k==="i"||k==="j"||k==="c"||k==="u")))e.preventDefault();
+});
+})();
 </script>
 </body>
 </html>`;
@@ -1043,7 +1216,10 @@ async function buildArabicMeta(type, rawId) {
   if (!base) return null;
 
   // 2. جلب التعريب الرسمي الفوري من TMDB API لكافة العناصر والحلقات والمواسم
-  const tmdbAr = await fetchTmdbArabic(type, lookupId);
+  const seasonList = [...new Set((Array.isArray(base.videos) ? base.videos : [])
+    .map(v => Number(v.season)).filter(n => Number.isInteger(n) && n > 0))]
+    .sort((a, b) => a - b).slice(0, 40);
+  const tmdbAr = await fetchTmdbArabic(type, lookupId, seasonList);
 
   const meta = {
     ...base,
@@ -1207,7 +1383,6 @@ function warmMeta(type, ids) {
     getMetaPayload(type, id).catch(() => {});
   }
 }
-
 // =========================================================================
 // 9. بناء قائمة البث المتطورة (Stream Engine) المتوازية
 // =========================================================================
@@ -1305,327 +1480,475 @@ function getStreamList(type, id, customTorboxUrl = null) {
 }
 
 // =========================================================================
-// 10. موجه الخادم الرئيسي (Master Route Handler)
+// 10. الحماية، الخيارات، والكتالوجات
 // =========================================================================
+
+const rateMap = new Map();
+const failMap = new Map();
+
+function hit(map, ip, limit, windowMs) {
+  const now = Date.now();
+  let e = map.get(ip);
+  if (!e || now - e.t > windowMs) e = { n: 0, t: now };
+  e.n++;
+  map.set(ip, e);
+  if (map.size > 4000) for (const [k, v] of map) if (now - v.t > windowMs) map.delete(k);
+  return e.n > limit;
+}
+
+function peekBlocked(ip, limit = 12, windowMs = 10 * 60 * 1000) {
+  const e = failMap.get(ip);
+  return Boolean(e && Date.now() - e.t < windowMs && e.n > limit);
+}
+
+function safeEq(a, b) {
+  const A = Buffer.from(String(a));
+  const B = Buffer.from(String(b));
+  const sameLen = A.length === B.length;
+  return timingSafeEqual(sameLen ? A : B, B) && sameLen;
+}
+
+function safeDecode(s) { try { return decodeURIComponent(s); } catch { return s; } }
+
+function clientIp(req) {
+  const h = req.headers || {};
+  return String(h["x-real-ip"] || String(h["x-forwarded-for"] || "").split(",")[0] || req.socket?.remoteAddress || "?").trim();
+}
+
+function cleanHost(h) {
+  const v = String(h || "").toLowerCase();
+  return /^[a-z0-9.-]{1,253}(:\d{1,5})?$/.test(v) ? v : "localhost";
+}
+
+function applySecurityHeaders(req, res) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  if (String(req.headers?.["x-forwarded-proto"] || "").startsWith("https")) {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000");
+  }
+}
+
+const SEG_DEBRID = /^(torbox|realdebrid|alldebrid|premiumize|debridlink)=([A-Za-z0-9_-]{8,128})$/i;
+const SEG_CFG = /^cfg=([a-z0-9.]{1,80})$/i;
+const SEG_TAB = /^(8k|4k|2k|1080p|720p|480p|hdr|arabic|cached|all)$/i;
+const TYPES = new Set(["movie", "series", "anime"]);
+const ID_RE = /^[A-Za-z0-9:_.-]{1,64}$/;
+const CAT_RE = /^[A-Za-z0-9_-]{1,60}$/;
+
+function parseExtra(raw) {
+  const out = {};
+  if (!raw) return out;
+  for (const part of String(raw).split("&")) {
+    const k = part.indexOf("=");
+    if (k < 1) continue;
+    const key = part.slice(0, k);
+    if (key !== "genre" && key !== "search" && key !== "skip") continue;
+    out[key] = safeDecode(part.slice(k + 1)).replace(/[\u0000-\u001f]/g, "").slice(0, 100);
+  }
+  return out;
+}
+
+function upstreamExtraSuffix(extra) {
+  const parts = [];
+  if (extra.genre) parts.push("genre=" + encodeURIComponent(extra.genre));
+  if (extra.search) parts.push("search=" + encodeURIComponent(extra.search));
+  const skip = parseInt(extra.skip, 10);
+  if (skip > 0) parts.push("skip=" + skip);
+  return parts.length ? `/${parts.join("&")}.json` : ".json";
+}
+
+// ---- ترشيح وعرض الروابط حسب الملف ----
+function applyStreamOptions(list, o) {
+  const out = list.filter(i => {
+    if (o.maxRank && i._rank > o.maxRank) return false;
+    if (o.noRemux && i._remux) return false;
+    if (o.noAv1 && i._av1) return false;
+    if (o.maxGB && i._bytes > o.maxGB * 1073741824) return false;
+    return true;
+  });
+  return out.length ? out : list; // لا نترك الشاشة فارغة أبداً
+}
+
+const STATUS_LABEL = {
+  instant: "فوري", download: "تنزيل سحابي", p2p: "P2P"
+};
+
+function renderStream(item, o) {
+  const out = stripPrivate(item);
+  if (o.noEmoji) {
+    const audio = stripAllEmojis(item._audioLabel || "");
+    const tags = [STATUS_LABEL[item._status], ...(item._tagParts || [])].filter(Boolean).join(" • ");
+    const d = `${audio}\n${tags}`;
+    out.title = d;
+    out.description = d;
+  }
+  return out;
+}
+
+// ---- كتالوجات TMDB ----
+const TMDB_CATALOGS = {
+  turkish_dramas_spotlight: { type: "series", path: "/discover/tv", params: "with_original_language=tr&sort_by=popularity.desc", fallback: "دراما تركية مميزة" },
+  kdrama_spotlight: { type: "series", path: "/discover/tv", params: "with_original_language=ko&sort_by=popularity.desc", fallback: "دراما كورية مشوقة ومميزة" },
+  egyptian_series_spotlight: { type: "series", path: "/discover/tv", params: "with_origin_country=EG&sort_by=popularity.desc", fallback: "مسلسل مصري" },
+  gulf_series_spotlight: { type: "series", path: "/discover/tv", params: "with_origin_country=SA%7CKW%7CAE%7CQA%7CBH%7COM&with_original_language=ar&sort_by=popularity.desc", fallback: "مسلسل خليجي" },
+  now_playing_movies: { type: "movie", path: "/movie/now_playing", region: true, fallback: "" },
+  top_rated_movies: { type: "movie", path: "/movie/top_rated", fallback: "" },
+  top_rated_series: { type: "series", path: "/tv/top_rated", fallback: "" }
+};
+
+function tmdbToMeta(r, type, fallback) {
+  const title = r.title || r.name || r.original_title || r.original_name;
+  if (!r.id || !title) return null;
+  return {
+    id: `tmdb:${r.id}`,
+    type,
+    name: stripAllEmojis(title),
+    poster: r.poster_path ? `${TMDB_IMG}/w500${r.poster_path}` : undefined,
+    posterShape: "poster",
+    background: r.backdrop_path ? `${TMDB_IMG}/w1280${r.backdrop_path}` : undefined,
+    description: r.overview || fallback || "",
+    releaseInfo: (r.first_air_date || r.release_date || "").slice(0, 4)
+  };
+}
+
+async function tmdbListMetas(path, qs, type, fallback, extra) {
+  const page = Math.floor((parseInt(extra.skip, 10) || 0) / 20) + 1;
+  const data = await safeFetchJson(tmdbUrl(path, `language=ar-SA&page=${Math.min(page, 20)}${qs ? "&" + qs : ""}`), {}, 3500);
+  return (data?.results || []).map(r => tmdbToMeta(r, type, fallback)).filter(Boolean);
+}
+
+async function catalogPayload(type, catalogId, extra, o, countryCode) {
+  const skip = Math.max(0, parseInt(extra.skip, 10) || 0);
+  const search = extra.search || "";
+  const finish = metas => ({ metas: metas.slice(0, o.catMax).map(m => shapeCatalogMeta(m, o)) });
+
+  // 1. الأنمي
+  if (catalogId === "anime_trending") {
+    const suffix = skip ? `/skip=${skip}.json` : ".json";
+    const kitsu = await safeFetchJson(`${UPSTREAM_ADDONS.animeKitsu}/catalog/anime/kitsu-anime-trending${suffix}`, {}, 3500);
+    const { items } = await localizeCatalogList((kitsu?.metas || []).slice(0, o.catLimit), type, o);
+    return { metas: items.slice(0, o.catMax) };
+  }
+
+  // 2. كتالوجات TMDB (تركي/كوري/مصري/خليجي/الأحدث/الأعلى تقييماً) مع ترقيم صفحات
+  const def = TMDB_CATALOGS[catalogId];
+  if (def && TMDB_API_KEY) {
+    const qs = [def.params, def.region ? `region=${encodeURIComponent(countryCode)}` : ""].filter(Boolean).join("&");
+    const metas = await tmdbListMetas(def.path, qs, def.type, def.fallback, extra);
+    return finish(metas);
+  }
+
+  // 3. الأفلام والمسلسلات العربية (Nuvio) مع ترقيم صفحات
+  if (catalogId === "arabic_movies_spotlight" || catalogId === "arabic_series_spotlight") {
+    const isMovie = catalogId === "arabic_movies_spotlight";
+    const base = isMovie ? "movie/movies-by-language" : "series/series-by-language";
+    const sfx = `genre=Arabic${skip ? `&skip=${skip}` : ""}`;
+    const data = await safeFetchJson(`${UPSTREAM_ADDONS.nuvio}/catalog/${base}/${sfx}.json`, {}, 3800);
+    const { items } = await localizeCatalogList((data?.metas || []).slice(0, o.catLimit), isMovie ? "movie" : "series", o);
+    return { metas: items.slice(0, o.catMax) };
+  }
+
+  // 4. بحث عربي مباشر عبر TMDB (النتائج بالعربية حتى لو كتبت الاسم بالعربية)
+  if (search && hasArabic(search) && TMDB_API_KEY) {
+    const isSeries = type === "series" || type === "anime";
+    const page = Math.floor(skip / 20) + 1;
+    const data = await safeFetchJson(
+      tmdbUrl(`/search/${isSeries ? "tv" : "movie"}`, `language=ar-SA&include_adult=false&page=${Math.min(page, 20)}&query=${encodeURIComponent(search)}`),
+      {}, 3500
+    );
+    const metas = (data?.results || []).map(r => tmdbToMeta(r, isSeries ? "series" : "movie", "")).filter(Boolean);
+    if (metas.length) return finish(metas);
+  }
+
+  // 5. بقية الكتالوجات (Nuvio + Cinemeta)
+  const suffix = upstreamExtraSuffix(extra);
+  const kind = type === "series" ? "series" : "movies";
+  let nuvioUrl = `${UPSTREAM_ADDONS.nuvio}/catalog/${type}/popular-${kind}${suffix}`;
+  let cinemetaUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${suffix}`;
+
+  const isNuvio = catalogId.startsWith("nuvio-");
+  const isTrending = catalogId === "trending_daily_movies" || catalogId === "trending_daily_series";
+  const isTop10 = catalogId === "top10_region_movies" || catalogId === "top10_region_series";
+
+  if (isNuvio) {
+    nuvioUrl = `${UPSTREAM_ADDONS.nuvio}/catalog/${type}/${catalogId.slice(6)}${suffix}`;
+    cinemetaUrl = null;
+  } else if (isTrending) {
+    nuvioUrl = `${UPSTREAM_ADDONS.nuvio}/catalog/${type}/trending-${kind}${suffix}`;
+  } else if (isTop10) {
+    nuvioUrl = `${UPSTREAM_ADDONS.nuvio}/catalog/${type}/trending-${kind}.json`;
+    cinemetaUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top.json`;
+  }
+
+  const [nuvioData, cineData] = await Promise.all([
+    safeFetchJson(nuvioUrl, {}, 3800),
+    cinemetaUrl ? safeFetchJson(cinemetaUrl, {}, 3500) : Promise.resolve(null)
+  ]);
+
+  const sourceList = (Array.isArray(nuvioData?.metas) && nuvioData.metas.length > 0)
+    ? nuvioData.metas
+    : (Array.isArray(cineData?.metas) ? cineData.metas : []);
+
+  let clean = [];
+  const seen = new Set();
+  for (const m of sourceList) {
+    if (!m || !m.id || seen.has(m.id)) continue;
+    seen.add(m.id);
+    clean.push({ ...m, name: stripAllEmojis(m.name || ""), genres: localizeGenres(m.genres) });
+  }
+
+  if (isTop10) {
+    clean = clean.slice(0, 10).map((item, idx) => ({ ...item, name: `TOP ${idx + 1} - ${item.name}` }));
+  }
+
+  const head = clean.slice(0, o.catLimit);
+  const { items } = await localizeCatalogList(head, type, o);
+  const rest = clean.slice(o.catLimit).map(m => shapeCatalogMeta(m, o));
+  const metas = [...items, ...rest].slice(0, o.catMax);
+
+  if (o.warm) warmMeta(type, metas.map(m => m.id));
+  return { metas };
+}
+
+// =========================================================================
+// 11. ملف التعريف (Manifest)
+// =========================================================================
+
+const TV_NUVIO = new Set([
+  "popular-movies", "popular-series", "new-and-upcoming-movies", "new-and-returning-series",
+  "netflix-movies", "netflix-series", "disney-plus-movies", "disney-plus-series"
+]);
+
+function buildManifest(o, tab, countryName) {
+  if (tab) {
+    const def = TABS[tab];
+    return {
+      id: `app.onetake2.tab.${tab}`,
+      version: VERSION,
+      name: def.label,
+      description: `${ADDON_NAME}: ${def.desc}`,
+      resources: ["stream"],
+      types: ["movie", "series", "anime"],
+      idPrefixes: ["tt", "kitsu:", "tmdb:", "tmdb"],
+      catalogs: [],
+      behaviorHints: { configurable: false, configurationRequired: false }
+    };
+  }
+
+  const tmdbOn = Boolean(TMDB_API_KEY);
+  const skipX = [{ name: "skip", isRequired: false }];
+  const cat = (type, id, name, extra = skipX) => ({ type, id, name, extra });
+
+  const catalogs = [
+    cat("movie", "top10_region_movies", `Movies - أفضل 10 في ${countryName}`, []),
+    cat("series", "top10_region_series", `Series - أفضل 10 في ${countryName}`, []),
+    cat("movie", "trending_daily_movies", "Movies - ترند اليوم"),
+    cat("series", "trending_daily_series", "Series - ترند اليوم"),
+    cat("movie", "arabic_movies_spotlight", "أفلام سينمائية عربية"),
+    cat("series", "arabic_series_spotlight", "مسلسلات عربية شهيرة"),
+    ...(tmdbOn ? [
+      cat("series", "egyptian_series_spotlight", "مسلسلات مصرية"),
+      cat("series", "gulf_series_spotlight", "مسلسلات خليجية"),
+      cat("series", "turkish_dramas_spotlight", "مسلسلات الدراما التركية"),
+      cat("series", "kdrama_spotlight", "مسلسلات الدراما الكورية (K-Drama)"),
+      cat("movie", "now_playing_movies", "أفلام في دور العرض الآن"),
+      cat("movie", "top_rated_movies", "أفلام الأعلى تقييماً"),
+      cat("series", "top_rated_series", "مسلسلات الأعلى تقييماً")
+    ] : []),
+    cat("series", "anime_trending", "أنمي - رائج ومميز"),
+    cat("movie", "onetake2_movies_main", "Movies - كل الأفلام", [
+      { name: "search", isRequired: false },
+      { name: "genre", isRequired: false, options: NV_MOVIE_GENRES },
+      { name: "skip", isRequired: false }
+    ]),
+    cat("series", "onetake2_series_main", "Series - كل المسلسلات", [
+      { name: "search", isRequired: false },
+      { name: "genre", isRequired: false, options: NV_SERIES_GENRES },
+      { name: "skip", isRequired: false }
+    ]),
+    ...nuvioCatalogs().filter(c => !o.tv || TV_NUVIO.has(c.id.slice(6)))
+  ];
+
+  const idSuffix = o.tv ? (o.lite ? "tv.lite" : "tv") : (o.lite ? "lite" : "main");
+  return {
+    id: `app.onetake2.${idSuffix}`,
+    version: VERSION,
+    name: o.tv ? `${ADDON_NAME} TV` : ADDON_NAME,
+    description: "1take2 - تعريب كامل للقصص والحلقات والتصنيفات، بحث عربي، دعم TMDB و IMDb، وترجمات عربية",
+    resources: o.lite ? ["catalog", "meta", "subtitles"] : ["catalog", "meta", "subtitles", "stream"],
+    types: ["movie", "series", "anime"],
+    idPrefixes: ["tt", "kitsu:", "tmdb:", "tmdb"],
+    catalogs,
+    behaviorHints: { configurable: true, configurationRequired: false }
+  };
+}
+
+// =========================================================================
+// 12. موجه الخادم الرئيسي (Master Route Handler) — خاص بمفتاح وصول
+// =========================================================================
+
+let warnedKey = false;
 
 export default async function handler(req, res) {
   try {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    applySecurityHeaders(req, res);
+    res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
     res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "*");
     res.setHeader("Cache-Control", "public, max-age=300, s-maxage=900, stale-while-revalidate=3600");
 
-    if (req.method === "OPTIONS") {
-      return res.status(200).end();
+    if (req.method === "OPTIONS") return res.status(204).end();
+    if (req.method !== "GET" && req.method !== "HEAD") return res.status(405).end();
+
+    const ip = clientIp(req);
+    if (hit(rateMap, ip, 1200, 60000)) {
+      res.setHeader("Retry-After", "60");
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(429).end();
     }
 
-    const host = req.headers["x-forwarded-host"] || req.headers["host"] || "localhost";
     const rawUrl = req.url || "/";
-    let pathPart = rawUrl.split("?")[0] || "/";
-    const queryPart = rawUrl.split("?")[1] || "";
-    let path;
-    try {
-      path = decodeURIComponent(pathPart).replace(/\/+$/, "") || "/";
-    } catch {
-      path = pathPart.replace(/\/+$/, "") || "/";
+    const q = rawUrl.indexOf("?");
+    const pathPart = q >= 0 ? rawUrl.slice(0, q) : rawUrl;
+    const queryPart = q >= 0 ? rawUrl.slice(q + 1) : "";
+    const rawSegs = pathPart.split("/").filter(Boolean);
+
+    // robots.txt: منع الفهرسة (الوحيد المتاح بدون مفتاح)
+    if (rawSegs.length === 1 && rawSegs[0] === "robots.txt") {
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.status(200).send("User-agent: *\nDisallow: /\n");
     }
 
-    let customTorboxUrl = null;
-    let customPathSegment = "";
-    const torboxMatch = path.match(/\/(torbox=[a-zA-Z0-9_-]+|realdebrid=[a-zA-Z0-9_-]+|debrid=[a-zA-Z0-9_-]+)/i);
-    if (torboxMatch) {
-      customPathSegment = torboxMatch[1];
-      const token = customPathSegment.split("=")[1];
-      if (token) {
-        customTorboxUrl = `https://torrentio.strem.fun/qualityfilter=scr,cam|torbox=${token}`;
-      }
-      path = path.replace(torboxMatch[0], "") || "/";
+    // ---- بوابة الخصوصية ----
+    res.setHeader("Vary", "Accept-Encoding");
+    if (!KEY_VALID) {
+      if (!warnedKey) { warnedKey = true; console.error("[1take2] ACCESS_KEY غير مضبوط أو غير صالح (12-64 حرفاً A-Z a-z 0-9 _ -). الخدمة مغلقة."); }
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.status(503).send("Service unavailable");
+    }
+    if (rawSegs[0] === "api") rawSegs.shift();
+    const denied = () => {
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.status(404).send("Not found");
+    };
+    if (peekBlocked(ip)) { res.setHeader("Retry-After", "600"); res.setHeader("Cache-Control", "no-store"); return res.status(429).end(); }
+    if (!rawSegs[0] || !safeEq(safeDecode(rawSegs[0]), ACCESS_KEY)) {
+      hit(failMap, ip, 12, 10 * 60 * 1000);
+      return denied();
     }
 
-    let lite = false;
-    const liteMatch = path.match(/^\/lite(\/.*)?$/i);
-    if (liteMatch) { lite = true; path = liteMatch[1] || "/"; }
+    const rawRest = rawSegs.slice(1);
+    const rest = rawRest.map(safeDecode);
 
-    let tab = null;
-    const tabMatch = path.match(/^\/(8k|4k|2k|1080p|720p|480p|hdr|arabic|cached|all)(\/.*)?$/i);
-    if (tabMatch) {
-      const raw = tabMatch[1].toLowerCase();
-      tab = TAB_ALIAS[raw] || raw;
-      path = tabMatch[2] || "/";
+    // ---- المعدّلات: ديبريد / خيارات / تبويب (بأي ترتيب) ----
+    let debrid = null, cfgTokens = [], tab = null;
+    const flags = {};
+    let i = 0;
+    for (; i < rest.length; i++) {
+      const s = rest[i];
+      let m;
+      if ((m = s.match(SEG_DEBRID))) debrid = { provider: m[1].toLowerCase(), token: m[2] };
+      else if ((m = s.match(SEG_CFG))) cfgTokens = m[1].toLowerCase().split(".").filter(Boolean);
+      else if (/^(lite|nostream)$/i.test(s)) flags.lite = true;
+      else if (/^tv$/i.test(s)) flags.tv = true;
+      else if (SEG_TAB.test(s)) { const r = s.toLowerCase(); tab = TAB_ALIAS[r] || r; }
+      else break;
     }
+    const o = buildOptions(flags, cfgTokens);
+    const tail = rest.slice(i);
+    const rawTail = rawRest.slice(i);
+    const route = (tail[0] || "").replace(/\.json$/i, "").toLowerCase();
+    const debridUrl = debrid ? `${TORRENTIO}/qualityfilter=scr,cam|${debrid.provider}=${debrid.token}` : null;
+    const host = cleanHost(String(req.headers["x-forwarded-host"] || req.headers.host || "localhost").split(",")[0].trim());
 
-    // -----------------------------------------------------------------
-    // أ. ملف التعريف (Manifest)
-    // -----------------------------------------------------------------
-    if (path === "/manifest.json" || path === "/api/index" || path === "/api" || path === "/manifest") {
+    // ---- Manifest ----
+    if (route === "manifest") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       const { countryName } = getUserRegionInfo(req);
-
-      if (tab) {
-        const def = TABS[tab];
-        return res.status(200).json({
-          id: `app.onetake2.tab.${tab}`,
-          version: VERSION,
-          name: def.label,
-          description: `${ADDON_NAME}: ${def.desc}`,
-          resources: ["stream"],
-          types: ["movie", "series", "anime"],
-          idPrefixes: ["tt", "kitsu:", "tmdb:", "tmdb"],
-          catalogs: [],
-          behaviorHints: { configurable: false, configurationRequired: false }
-        });
-      }
-
-      return res.status(200).json({
-        id: lite ? "app.onetake2.lite" : "app.onetake2.main",
-        version: VERSION,
-        name: ADDON_NAME,
-        description: "1take2 للأفلام والمسلسلات والأنمي - تعريب كامل فوري للقصص والحلقات والتصنيفات، دعم TMDB و IMDb، وسيرفرات فائقة السرعة مع الترجمة العربية",
-        resources: lite ? ["catalog", "meta", "subtitles"] : ["catalog", "meta", "subtitles", "stream"],
-        types: ["movie", "series", "anime"],
-        idPrefixes: ["tt", "kitsu:", "tmdb:", "tmdb"],
-        catalogs: [
-          { type: "movie", id: "top10_region_movies", name: `Movies - أفضل 10 في ${countryName}` },
-          { type: "series", id: "top10_region_series", name: `Series - أفضل 10 في ${countryName}` },
-          { type: "movie", id: "trending_daily_movies", name: "Movies - ترند اليوم", extra: [{ name: "skip", isRequired: false }] },
-          { type: "series", id: "trending_daily_series", name: "Series - ترند اليوم", extra: [{ name: "skip", isRequired: false }] },
-          { type: "movie", id: "arabic_movies_spotlight", name: "أفلام سينمائية عربية", extra: [{ name: "skip", isRequired: false }] },
-          { type: "series", id: "arabic_series_spotlight", name: "مسلسلات عربية شهيرة", extra: [{ name: "skip", isRequired: false }] },
-          { type: "series", id: "turkish_dramas_spotlight", name: "مسلسلات الدراما التركية", extra: [{ name: "skip", isRequired: false }] },
-          { type: "series", id: "kdrama_spotlight", name: "مسلسلات الدراما الكورية (K-Drama)", extra: [{ name: "skip", isRequired: false }] },
-          { type: "series", id: "anime_trending", name: "أنمي - رائج ومميز", extra: [{ name: "skip", isRequired: false }] },
-          {
-            type: "movie", id: "onetake2_movies_main", name: "Movies - كل الأفلام",
-            extra: [
-              { name: "search", isRequired: false },
-              { name: "genre", isRequired: false, options: NV_MOVIE_GENRES },
-              { name: "skip", isRequired: false }
-            ]
-          },
-          {
-            type: "series", id: "onetake2_series_main", name: "Series - كل المسلسلات",
-            extra: [
-              { name: "search", isRequired: false },
-              { name: "genre", isRequired: false, options: NV_SERIES_GENRES },
-              { name: "skip", isRequired: false }
-            ]
-          },
-          ...nuvioCatalogs()
-        ],
-        behaviorHints: { configurable: true, configurationRequired: false }
-      });
+      return res.status(200).json(buildManifest(o, tab, countryName));
     }
 
-    // -----------------------------------------------------------------
-    // ب. صفحة الفحص الصحي للمنظومة (Health Dashboard)
-    // -----------------------------------------------------------------
-    if (path === "/health") {
+    // ---- صفحة التثبيت ----
+    if (route === "" || route === "configure") {
+      const nonce = randomBytes(16).toString("base64");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Content-Security-Policy",
+        `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
+      return res.status(200).send(renderConfigPage(host, ACCESS_KEY, nonce));
+    }
+
+    // ---- الفحص الصحي (معطّل افتراضياً) ----
+    if (route === "health") {
+      if (!ENABLE_HEALTH) return denied();
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.setHeader("Cache-Control", "no-store");
       const providers = {};
-      for (const [h, st] of healthMetrics) {
-        providers[h] = { fails: st.fails, healthy: !(st.fails >= 5 && Date.now() - st.lastFail < 25000) };
-      }
-      return res.status(200).json({
-        status: "نشط ويعمل بكفاءة إمبراطورية",
-        version: VERSION,
-        persistentCache: KV_ON,
-        p2p: ENABLE_P2P,
-        cacheEntries: memoryCache.size,
-        idMapEntries: idMapCache.size,
-        providers
-      });
+      for (const [h, st] of healthMetrics) providers[h] = { fails: st.fails, healthy: !(st.fails >= 5 && Date.now() - st.lastFail < 25000) };
+      return res.status(200).json({ status: "ok", version: VERSION, tmdb: Boolean(TMDB_API_KEY), persistentCache: KV_ON, p2p: ENABLE_P2P, cacheEntries: memoryCache.size, providers });
     }
 
-    // -----------------------------------------------------------------
-    // ج. صفحة التثبيت (Config Page)
-    // -----------------------------------------------------------------
-    if (path === "" || path === "/") {
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.status(200).send(renderConfigPage(host, customPathSegment));
-    }
+    const type = tail[1] || "movie";
+    const id = (tail[2] || "").replace(/\.json$/i, "");
 
-    // -----------------------------------------------------------------
-    // د. الكتالوجات (Catalogs Engine)
-    // -----------------------------------------------------------------
-    if (path.includes("/catalog/")) {
+    // ---- الكتالوجات ----
+    if (route === "catalog") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const subPath = path.substring(path.indexOf("/catalog/"));
-      const parts = subPath.split("/").filter(Boolean);
-      const type = parts[1] || "movie";
-      const catalogId = (parts[2] || "").replace(/\.json$/, "");
+      if (!TYPES.has(type) || !CAT_RE.test(id)) return res.status(200).json({ metas: [] });
 
-      const rawCatParts = pathPart.substring(Math.max(0, pathPart.indexOf("/catalog/"))).split("/").filter(Boolean);
-      let extraPart = (rawCatParts[3] || parts[3] || "").replace(/\.json$/, "");
-      if (queryPart && !extraPart) extraPart = queryPart;
-
+      const extraRaw = (rawTail[3] || "").replace(/\.json$/i, "");
+      const extra = parseExtra(extraRaw || queryPart);
       const { countryCode } = getUserRegionInfo(req);
-      const daySeed = Math.floor(Date.now() / (1000 * 60 * 60 * 12));
+      const daySeed = Math.floor(Date.now() / (12 * 60 * 60 * 1000));
+      const cacheKey = `cat_v21_${o.tv ? "tv" : "d"}_${o.catMax}_${type}_${id}_${countryCode}_${daySeed}_${upstreamExtraSuffix(extra)}`;
 
-      const cacheKey = `cat_v20_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
-      const cachedCat = getFromCache(cacheKey, true, CACHE_TTL_CAT);
-      if (cachedCat) return res.status(200).json(cachedCat);
+      const fresh = getFromCache(cacheKey, false);
+      if (fresh) return res.status(200).json(fresh);
 
-      const extraSuffix = extraPart ? `/${extraPart}.json` : ".json";
-
-      // 1. كتالوجات الأنمي
-      if (catalogId === "anime_trending") {
-        const kitsuData = await safeFetchJson(`${UPSTREAM_ADDONS.animeKitsu}/catalog/anime/kitsu-anime-trending.json`, {}, 3500);
-        const metas = kitsuData?.metas || [];
-        const { items } = await localizeCatalogList(metas.slice(0, 40), type);
-        const payload = { metas: items };
-        saveToCache(cacheKey, payload, CACHE_TTL_CAT);
-        return res.status(200).json(payload);
-      }
-
-      // 2. كتالوجات الدراما التركية
-      if (catalogId === "turkish_dramas_spotlight") {
-        const trData = await safeFetchJson(`${TMDB_BASE}/discover/tv?with_original_language=tr&sort_by=popularity.desc&language=ar-SA&api_key=${TMDB_API_KEY}`, {}, 3500);
-        const metas = (trData?.results || []).map(r => ({
-          id: `tmdb:${r.id}`,
-          type: "series",
-          name: stripAllEmojis(r.name || r.original_name),
-          poster: r.poster_path ? `https://image.tmdb.org/t/p/w500${r.poster_path}` : null,
-          background: r.backdrop_path ? `https://image.tmdb.org/t/p/original${r.backdrop_path}` : null,
-          description: r.overview || "دراما تركية مميزة",
-          releaseInfo: r.first_air_date ? r.first_air_date.slice(0, 4) : ""
-        }));
-        const payload = { metas };
-        saveToCache(cacheKey, payload, CACHE_TTL_CAT);
-        return res.status(200).json(payload);
-      }
-
-      // 3. كتالوجات الدراما الكورية
-      if (catalogId === "kdrama_spotlight") {
-        const krData = await safeFetchJson(`${TMDB_BASE}/discover/tv?with_original_language=ko&sort_by=popularity.desc&language=ar-SA&api_key=${TMDB_API_KEY}`, {}, 3500);
-        const metas = (krData?.results || []).map(r => ({
-          id: `tmdb:${r.id}`,
-          type: "series",
-          name: stripAllEmojis(r.name || r.original_name),
-          poster: r.poster_path ? `https://image.tmdb.org/t/p/w500${r.poster_path}` : null,
-          background: r.backdrop_path ? `https://image.tmdb.org/t/p/original${r.backdrop_path}` : null,
-          description: r.overview || "دراما كورية مشوقة ومميزة",
-          releaseInfo: r.first_air_date ? r.first_air_date.slice(0, 4) : ""
-        }));
-        const payload = { metas };
-        saveToCache(cacheKey, payload, CACHE_TTL_CAT);
-        return res.status(200).json(payload);
-      }
-
-      // 4. كتالوجات الأفلام والمسلسلات العربية الخاصة
-      if (catalogId === "arabic_movies_spotlight") {
-        const nuvioAr = await safeFetchJson(`${UPSTREAM_ADDONS.nuvio}/catalog/movie/movies-by-language/genre=Arabic.json`, {}, 3800);
-        const metas = nuvioAr?.metas || [];
-        const { items } = await localizeCatalogList(metas, "movie");
-        const payload = { metas: items };
-        saveToCache(cacheKey, payload, CACHE_TTL_CAT);
-        return res.status(200).json(payload);
-      }
-
-      if (catalogId === "arabic_series_spotlight") {
-        const nuvioAr = await safeFetchJson(`${UPSTREAM_ADDONS.nuvio}/catalog/series/series-by-language/genre=Arabic.json`, {}, 3800);
-        const metas = nuvioAr?.metas || [];
-        const { items } = await localizeCatalogList(metas, "series");
-        const payload = { metas: items };
-        saveToCache(cacheKey, payload, CACHE_TTL_CAT);
-        return res.status(200).json(payload);
-      }
-
-      // 5. بقية الكتالوجات (Nuvio + Cinemeta)
-      let nuvioUrl = `${UPSTREAM_ADDONS.nuvio}/catalog/${type}/popular-${type === "series" ? "series" : "movies"}${extraSuffix}`;
-      let cinemetaUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top${extraSuffix}`;
-
-      const isNuvio = catalogId.startsWith("nuvio-");
-      const isTrending = catalogId === "trending_daily_movies" || catalogId === "trending_daily_series";
-      const isTop10 = catalogId === "top10_region_movies" || catalogId === "top10_region_series";
-
-      if (isNuvio) {
-        nuvioUrl = `${UPSTREAM_ADDONS.nuvio}/catalog/${type}/${catalogId.slice(6)}${extraSuffix}`;
-        cinemetaUrl = null;
-      } else if (isTrending) {
-        nuvioUrl = `${UPSTREAM_ADDONS.nuvio}/catalog/${type}/trending-${type === "series" ? "series" : "movies"}${extraSuffix}`;
-      } else if (isTop10) {
-        nuvioUrl = `${UPSTREAM_ADDONS.nuvio}/catalog/${type}/trending-${type === "series" ? "series" : "movies"}.json`;
-        cinemetaUrl = `${UPSTREAM_ADDONS.cinemeta}/catalog/${type}/top.json`;
-      }
-
-      const nuvioP = safeFetchJson(nuvioUrl, {}, 3800);
-      const cineP = cinemetaUrl ? safeFetchJson(cinemetaUrl, {}, 3500) : Promise.resolve(null);
-      const [nuvioData, cineData] = await Promise.all([nuvioP, cineP]);
-
-      const sourceList = (Array.isArray(nuvioData?.metas) && nuvioData.metas.length > 0)
-        ? nuvioData.metas
-        : (Array.isArray(cineData?.metas) ? cineData.metas : []);
-
-      let cleanMetas = [];
-      const seenIds = new Set();
-      for (const m of sourceList) {
-        if (!m || !m.id || seenIds.has(m.id)) continue;
-        seenIds.add(m.id);
-        const entry = {
-          ...m,
-          name: stripAllEmojis(m.name || ""),
-          genres: localizeGenres(m.genres)
-        };
-        cleanMetas.push(entry);
-      }
-
-      if (isTop10) {
-        cleanMetas = cleanMetas.slice(0, 10).map((item, idx) => ({ ...item, name: `TOP ${idx + 1} - ${item.name}` }));
-      }
-
-      const { items: localizedBatch } = await localizeCatalogList(cleanMetas.slice(0, 45), type);
-      const finalMetas = [...localizedBatch, ...cleanMetas.slice(45)];
-
-      if (finalMetas.length === 0) {
+      const payload = await catalogPayload(type, id, extra, o, countryCode);
+      if (payload.metas.length === 0) {
         const stale = getFromCache(cacheKey, true, CACHE_TTL_CAT * 3);
         if (stale) return res.status(200).json(stale);
+        res.setHeader("Cache-Control", "public, max-age=30, s-maxage=60");
+        return res.status(200).json(payload);
       }
-
-      warmMeta(type, finalMetas.map(m => m.id));
-      const payload = { metas: finalMetas };
       saveToCache(cacheKey, payload, CACHE_TTL_CAT);
       return res.status(200).json(payload);
     }
 
-    // -----------------------------------------------------------------
-    // هـ. صفحة التفاصيل (Meta Engine) - تعريب القصص والحلقات بدقة 100%
-    // -----------------------------------------------------------------
-    if (path.includes("/meta/")) {
+    // ---- صفحة التفاصيل ----
+    if (route === "meta") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const parts = path.substring(path.indexOf("/meta/")).split("/").filter(Boolean);
-      const type = parts[1] || "movie";
-      const id = (parts[2] || "").replace(/\.json$/, "");
-
+      if (!TYPES.has(type) || !ID_RE.test(id)) return res.status(200).json({ meta: null });
       const { payload, partial } = await getMetaPayload(type, id);
       if (partial) res.setHeader("Cache-Control", "public, max-age=30, s-maxage=120");
-      return res.status(200).json(payload);
+      return res.status(200).json(payload?.meta ? { meta: shapeMeta(payload.meta, o) } : payload);
     }
 
-    // -----------------------------------------------------------------
-    // و. الترجمات العربية (Subtitles Engine)
-    // -----------------------------------------------------------------
-    if (path.includes("/subtitles/")) {
+    // ---- الترجمات العربية ----
+    if (route === "subtitles") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const parts = path.substring(path.indexOf("/subtitles/")).split("/").filter(Boolean);
-      const type = parts[1] || "movie";
-      let id = (parts[2] || "").replace(/\.json$/, "");
+      if (!TYPES.has(type) || !ID_RE.test(id)) return res.status(200).json({ subtitles: [] });
 
-      if (id.startsWith("tmdb:")) {
-        const p = id.split(":");
-        const pureTmdb = p[1];
-        const imdb = await resolveTmdbToImdb(pureTmdb, type);
-        if (imdb) id = p.length > 2 ? `${imdb}:${p[2]}:${p[3] || 1}` : imdb;
+      let subId = id;
+      if (subId.startsWith("tmdb:")) {
+        const p = subId.split(":");
+        const imdb = await resolveTmdbToImdb(p[1], type);
+        if (imdb) subId = p.length > 2 ? `${imdb}:${p[2]}:${p[3] || 1}` : imdb;
       }
 
-      const cacheKey = `subs_v20_${type}_${id}`;
+      const extraSub = (rawTail[3] || "").replace(/\.json$/i, "");
+      const safeExtra = /^[A-Za-z0-9=&._%-]{1,200}$/.test(extraSub) ? extraSub : "";
+      const cacheKey = `subs_v21_${type}_${subId}_${safeExtra}_${o.subsMax}`;
       const cachedSubs = getFromCache(cacheKey, true, CACHE_TTL_META);
       if (cachedSubs) return res.status(200).json({ subtitles: cachedSubs });
 
-      const rawSub = pathPart;
-      const extraSub = (rawSub.substring(Math.max(0, rawSub.indexOf("/subtitles/"))).split("/").filter(Boolean)[3] || "").replace(/\.json$/, "");
-      const targetSubUrl = `${UPSTREAM_ADDONS.opensubtitlesV3}/subtitles/${type}/${id}${extraSub ? "/" + extraSub : ""}.json`;
-
+      const targetSubUrl = `${UPSTREAM_ADDONS.opensubtitlesV3}/subtitles/${type}/${subId}${safeExtra ? "/" + safeExtra : ""}.json`;
       const subRes = await withDeadline(safeFetchJson(targetSubUrl, {}, 3200), 3400);
       const isArabicLang = l => /^(ara|ar|arb|arabic|ar-[a-z]{2})$/i.test(String(l || "").trim());
       const seenUrls = new Set();
@@ -1645,60 +1968,84 @@ export default async function handler(req, res) {
         }
       }
 
-      if (subtitles.length) saveToCache(cacheKey, subtitles, CACHE_TTL_META);
-      return res.status(200).json({ subtitles: subtitles.slice(0, 25) });
+      const finalSubs = subtitles.slice(0, o.subsMax);
+      if (finalSubs.length) saveToCache(cacheKey, finalSubs, CACHE_TTL_META);
+      return res.status(200).json({ subtitles: finalSubs });
     }
 
-    // -----------------------------------------------------------------
-    // ز. البث المباشر (Stream Engine)
-    // -----------------------------------------------------------------
-    if (path.includes("/stream/")) {
+    // ---- البث المباشر ----
+    if (route === "stream") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.setHeader("Cache-Control", "public, max-age=120, s-maxage=300, stale-while-revalidate=900");
-      const streamSubPath = path.substring(path.indexOf("/stream/"));
-      const parts = streamSubPath.split("/").filter(Boolean);
-      const type = parts[1] || "movie";
-      const id = (parts[2] || "").replace(/\.json$/, "");
+      if (!TYPES.has(type) || !ID_RE.test(id)) return res.status(200).json({ streams: [] });
 
-      const list = await getStreamList(type, id, customTorboxUrl);
+      const list = await getStreamList(type, id, debridUrl);
       const def = tab ? TABS[tab] : null;
       const filtered = def ? list.filter(def.test) : list;
-
-      const finalStreams = filtered.slice(0, 60).map(stripPrivate);
+      const finalStreams = applyStreamOptions(filtered, o).slice(0, o.maxStreams).map(s => renderStream(s, o));
       if (finalStreams.length === 0) res.setHeader("Cache-Control", "public, max-age=15, s-maxage=30");
       return res.status(200).json({ streams: finalStreams });
     }
 
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    return res.status(200).json({
-      status: "نشط ويعمل بكفاءة إمبراطورية",
-      name: `${ADDON_NAME} v${VERSION}`,
-      description: "إضافة الترفيه المتكاملة للأفلام والمسلسلات والأنمي والدراما"
-    });
-
-  } catch (err) {
-    return res.status(200).json({ streams: [], metas: [], subtitles: [] });
+    return denied();
+  } catch {
+    if (!res.headersSent) {
+      try { res.setHeader("Content-Type", "application/json; charset=utf-8"); } catch { /* تجاهل */ }
+      return res.status(200).json({ streams: [], metas: [], subtitles: [] });
+    }
   }
 }
 
 // =========================================================================
-// 11. تشغيل تلقائي كخادم مستقل عند التشغيل عبر Node.js (Standalone Server)
+// 13. تشغيل مستقل (Node.js) — مع gzip و ETag وحدود مهلة
 // =========================================================================
 
-if (process.argv[1] && (
-  process.argv[1].endsWith("[...path] (2).js") ||
-  process.argv[1].endsWith("[...path].js") ||
-  process.argv[1].endsWith("server.js") ||
-  process.argv[1].endsWith("index.js")
-)) {
-  const http = await import("http");
-  const PORT = process.env.PORT || 3000;
-  const server = http.createServer((req, res) => handler(req, res));
-  server.listen(PORT, () => {
-    console.log(`\n======================================================`);
-    console.log(`🚀 ${ADDON_NAME} v${VERSION} يعمل بنجاح!`);
-    console.log(`🌐 واجهة التحكم والتثبيت: http://localhost:${PORT}`);
-    console.log(`📡 رابط التثبيت المباشر في Stremio: stremio://localhost:${PORT}/manifest.json`);
-    console.log(`======================================================\n`);
+function decorate(req, res) {
+  if (typeof res.status === "function") return;
+  res.status = c => { res.statusCode = c; return res; };
+  const send = (body, ctype) => {
+    if (ctype && !res.getHeader("Content-Type")) res.setHeader("Content-Type", ctype);
+    const buf = Buffer.from(body, "utf8");
+    const noBody = req.method === "HEAD";
+    if (res.statusCode === 200 && req.method === "GET" && !String(res.getHeader("Cache-Control")).includes("no-store")) {
+      const etag = `W/"${hashStr(body)}"`;
+      res.setHeader("ETag", etag);
+      if (req.headers["if-none-match"] === etag) { res.statusCode = 304; return res.end(); }
+    }
+    if (buf.length > 1024 && /\bgzip\b/.test(String(req.headers["accept-encoding"] || ""))) {
+      return zlib.gzip(buf, (err, z) => {
+        if (err) { res.setHeader("Content-Length", buf.length); return res.end(noBody ? undefined : buf); }
+        res.setHeader("Content-Encoding", "gzip");
+        res.setHeader("Content-Length", z.length);
+        res.end(noBody ? undefined : z);
+      });
+    }
+    res.setHeader("Content-Length", buf.length);
+    res.end(noBody ? undefined : buf);
+  };
+  res.json = o => send(JSON.stringify(o), "application/json; charset=utf-8");
+  res.send = s => send(String(s), "text/html; charset=utf-8");
+}
+
+const isMain = (() => {
+  if (process.env.STANDALONE === "1") return true;
+  try { return Boolean(process.argv[1]) && fileURLToPath(import.meta.url) === resolvePath(process.argv[1]); } catch { return false; }
+})();
+
+if (isMain) {
+  const PORT = Number(process.env.PORT) || 3000;
+  const HOST = process.env.HOST || "0.0.0.0";
+  const server = http.createServer((req, res) => { decorate(req, res); handler(req, res); });
+  server.requestTimeout = 30000;
+  server.headersTimeout = 15000;
+  server.keepAliveTimeout = 65000;
+  server.listen(PORT, HOST, () => {
+    console.log(`\n${ADDON_NAME} v${VERSION} يعمل على المنفذ ${PORT}`);
+    if (KEY_VALID) {
+      console.log(`صفحة التثبيت:  http://localhost:${PORT}/<ACCESS_KEY>/`);
+    } else {
+      console.log(`⚠ ACCESS_KEY غير مضبوط: الخدمة مغلقة. اقتراح مفتاح: ACCESS_KEY=${randomBytes(18).toString("base64url")}`);
+    }
+    if (!TMDB_API_KEY) console.log("ℹ TMDB_API_KEY غير مضبوط: التعريب الرسمي والكتالوجات التركية/الكورية/المصرية معطّلة.");
   });
 }
