@@ -1002,7 +1002,7 @@ function cleanAndFormatStream(stream) {
   }
 }
 // =========================================================================
-// 7. صفحة التثبيت الخاصة (تعمل فقط بعد إدخال المفتاح في الرابط)
+// 7. صفحة التثبيت الخاصة + تخصيص المانفيست
 // - CSP صارم بـ nonce، لا موارد خارجية، لا أزرار inline، لا أسرار في المصدر
 // - مناسبة للريموت: أزرار كبيرة وتركيز واضح
 // =========================================================================
@@ -1010,8 +1010,16 @@ function cleanAndFormatStream(stream) {
 function jsStr(v) {
   return JSON.stringify(String(v)).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 }
+function jsJson(v) {
+  return JSON.stringify(v).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
+}
 
-function renderConfigPage(host, key, nonce) {
+function renderConfigPage(host, key, nonce, countryName = "منطقتك") {
+  const tmdbOn = Boolean(TMDB_API_KEY);
+  const reg = catalogRegistry(countryName)
+    .filter(c => !c.tmdb || tmdbOn)
+    .map(c => ({ k: catKey(c), ty: c.type, n: c.name, tv: c.tv ? 1 : 0, m: c.m ? 1 : 0 }));
+
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -1027,36 +1035,49 @@ html{font-size:17px}
 @media(min-width:1100px){html{font-size:20px}}
 body{min-height:100vh;display:flex;justify-content:center;padding:24px 14px;background:radial-gradient(circle at top,#15151f,var(--bg));color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;line-height:1.6;-webkit-user-select:none;user-select:none}
 input,select{-webkit-user-select:text;user-select:text}
-.card{width:100%;max-width:720px;height:fit-content;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:28px 24px}
+.card{width:100%;max-width:760px;height:fit-content;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:28px 24px}
 .badge{display:inline-block;padding:4px 12px;background:rgba(229,181,58,.15);color:var(--gold);border-radius:20px;font-size:.72rem;font-weight:700}
 h1{font-size:1.9rem;margin:8px 0 2px}h1 span{color:var(--gold)}
 .lead{color:var(--sub);font-size:.85rem;margin-bottom:6px}
-h2{font-size:1rem;color:var(--gold);margin:24px 0 10px}
+h2{font-size:1rem;color:var(--gold);margin:26px 0 10px}
+.hint{color:var(--sub);font-size:.75rem;margin:4px 0 8px}
 .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .opt,.tile,.btn{display:block;width:100%;padding:14px 12px;border-radius:14px;border:2px solid var(--line);background:#16161f;color:#fff;text-align:center;text-decoration:none;font:inherit;font-weight:700;cursor:pointer}
 .opt small,.tile small{display:block;font-weight:400;font-size:.7rem;color:var(--sub);margin-top:2px}
 .opt[aria-pressed=true]{border-color:var(--gold);background:#221d0e;color:var(--gold)}
+.opt[disabled]{opacity:.4;cursor:not-allowed}
 .btn-gold{background:var(--gold);color:#09090c;border-color:var(--gold);margin-top:14px}
 .btn-dark{margin-top:10px;background:#181824;color:#ccc}
 .tile{color:var(--gold)}
 label.l{display:block;font-size:.78rem;color:var(--sub);margin:12px 0 6px}
-input[type=password],select{width:100%;padding:12px 14px;border-radius:12px;border:2px solid var(--line);background:#181822;color:#fff;font:inherit;outline:none}
+input[type=password],input[type=text],input[type=number],select,.ti{width:100%;padding:11px 12px;border-radius:12px;border:2px solid var(--line);background:#181822;color:#fff;font:inherit;outline:none}
 .chk{display:flex;gap:10px;align-items:center;padding:8px 2px;font-size:.88rem}
 .chk input{width:22px;height:22px;accent-color:var(--gold)}
+.crow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:8px 0;align-items:center;padding:10px;border:1px solid var(--line);border-radius:14px;background:#0d0d13}
+.cat{grid-template-columns:auto auto minmax(120px,1fr) auto auto;padding:6px 10px}
+.cat input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold)}
+.tag{font-size:.68rem;color:var(--gold);white-space:nowrap}
+.mini{padding:8px 13px;border-radius:10px;border:2px solid var(--line);background:#16161f;color:#fff;font:inherit;font-weight:700;cursor:pointer}
+.addb{margin-top:6px;padding:10px 14px;border-radius:12px;border:2px dashed rgba(229,181,58,.5);background:transparent;color:var(--gold);font:inherit;font-weight:700;cursor:pointer}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+details{margin-top:10px}
+summary{cursor:pointer;padding:12px 14px;border-radius:12px;border:2px solid var(--line);background:#16161f;font-weight:700}
+.cats{max-height:520px;overflow-y:auto;margin-top:8px}
 :focus-visible{outline:4px solid var(--gold);outline-offset:2px}
 .note{margin-top:20px;padding:12px 14px;border-radius:12px;background:#17151e;border:1px solid rgba(229,181,58,.25);font-size:.8rem;color:#e2d9c4}
-#out{direction:ltr;text-align:left;word-break:break-all;font-size:.68rem;color:var(--sub);margin-top:10px}
+#warn{color:#ff8f8f;font-size:.78rem;margin-top:8px}
+#out{direction:ltr;text-align:left;word-break:break-all;font-size:.66rem;color:var(--sub);margin-top:10px}
 </style>
 </head>
 <body>
 <main class="card">
   <span class="badge">v${VERSION} • نسخة خاصة</span>
   <h1>إضافة <span>${ADDON_NAME}</span></h1>
-  <p class="lead">اختر جهازك وخياراتك ثم ثبّت الإضافة. الرابط الناتج يحمل مفتاحك الخاص — لا تشاركه.</p>
+  <p class="lead">اختر جهازك وخياراتك ثم ثبّت الإضافة. الرابط الناتج يحمل إعداداتك (وربما مفاتيحك) — لا تشاركه.</p>
 
   <h2>1. الجهاز</h2>
   <div class="row">
-    <button class="opt" data-profile="tv" aria-pressed="true" id="firstFocus">تلفاز<small>خفيف وسلس • صور أصغر • روابط أخف</small></button>
+    <button class="opt" data-profile="tv" aria-pressed="true" id="firstFocus">تلفاز<small>خفيف وسلس • صور أصغر</small></button>
     <button class="opt" data-profile="mobile" aria-pressed="false">موبايل / كمبيوتر<small>كل الكتالوجات والمزايا</small></button>
     <button class="opt" data-profile="saver" aria-pressed="false">توفير بيانات<small>حد 720p • قائمة أقصر</small></button>
   </div>
@@ -1096,26 +1117,219 @@ input[type=password],select{width:100%;padding:12px 14px;border-radius:12px;bord
   <label class="chk"><input type="checkbox" id="noemoji" checked> إخفاء الإيموجي من أسماء الروابط</label>
   <label class="chk"><input type="checkbox" id="lite"> بدون روابط بث (استخدام إضافة بث أخرى)</label>
 
-  <h2>4. التثبيت</h2>
+  <h2>4. هوية الإضافة ومصدر الكتالوجات</h2>
+  <label class="l" for="aname">اسم الإضافة في Stremio (اختياري)</label>
+  <input type="text" id="aname" maxlength="30" autocomplete="off" placeholder="${ADDON_NAME}">
+  <label class="l">مصدر الكتالوجات</label>
+  <div class="row">
+    <button class="opt" data-mode="mix" aria-pressed="true">مختلط<small>Nuvio + Cinemeta + TMDB</small></button>
+    <button class="opt" data-mode="tmdb" aria-pressed="false"${tmdbOn ? "" : " disabled"}>وضع TMDB<small>${tmdbOn ? "كتالوجات TMDB فقط + بحث بأي لغة" : "يتطلب TMDB_API_KEY في الخادم"}</small></button>
+  </div>
+
+  <h2>5. الكتالوجات (إظهار / ترتيب / إعادة تسمية)</h2>
+  <details>
+    <summary>تخصيص قائمة الكتالوجات</summary>
+    <div class="tools">
+      <button class="mini" type="button" id="catAll">تحديد الكل</button>
+      <button class="mini" type="button" id="catNone">إلغاء الكل</button>
+      <button class="mini" type="button" id="catReset">الافتراضي</button>
+    </div>
+    <div class="cats" id="cats"></div>
+  </details>
+
+  <h2>6. قوائم MDBList</h2>
+  <p class="hint">أدخل مفتاح MDBList من mdblist.com/preferences ثم رابط أي قائمة (مثل mdblist.com/lists/مستخدم/قائمة).</p>
+  <input type="password" id="mdbkey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="مفتاح MDBList">
+  <div id="mlrows"></div>
+  <button class="addb" type="button" id="mlAdd">+ إضافة قائمة MDBList</button>
+
+  <h2>7. قوائم TMDB</h2>
+  <p class="hint">${tmdbOn ? "رقم قائمة TMDB أو رابطها (themoviedb.org/list/رقم)." : "تتطلب TMDB_API_KEY في الخادم."}</p>
+  <div id="tlrows"></div>
+  <button class="addb" type="button" id="tlAdd">+ إضافة قائمة TMDB</button>
+
+  <h2>8. كتالوج TMDB مخصص (Discover)</h2>
+  <p class="hint">${tmdbOn ? "ابنِ كتالوجك: النوع، الترتيب، التصنيف، اللغة، الدولة، السنوات، منصة المشاهدة، أدنى تقييم." : "يتطلب TMDB_API_KEY في الخادم."}</p>
+  <div id="dcrows"></div>
+  <button class="addb" type="button" id="dcAdd">+ إضافة كتالوج مخصص</button>
+
+  <h2>9. التثبيت</h2>
   <a class="btn btn-gold" id="install" href="#">تثبيت ${ADDON_NAME} في Stremio</a>
   <button class="btn btn-dark" id="copy" type="button">نسخ رابط المانفيست</button>
+  <div id="warn"></div>
   <div id="out"></div>
 
-  <h2>5. تبويبات الجودة (اختياري)</h2>
+  <h2>10. تبويبات الجودة (اختياري)</h2>
   <div class="row" id="tabs"></div>
 
   <div class="note">للتلفاز: اضغط «نسخ» وافتح الرابط من هاتفك لتثبيته على Stremio عبر نفس الحساب، أو اكتب الرابط يدوياً في خانة إضافة مجتمعية. لا تشارك الرابط مع أحد.</div>
 </main>
 <script nonce="${nonce}">
 (function(){
-var H=${jsStr(host)}, K=${jsStr(key)};
+var H=${jsStr(host)}, K=${jsStr(key)}, REG=${jsJson(reg)}, TMDB_ON=${tmdbOn ? 1 : 0};
+var GM=${jsJson(TM_GENRES.movie)}, GT=${jsJson(TM_GENRES.tv)}, PROV=${jsJson(TM_PROVIDERS)};
 var secure=location.protocol==="https:";
 var TABS=[["4k","4K"],["1080p","1080p"],["hdr","HDR"],["720p","720p"],["arabic","صوت عربي"],["cached","فوري سحابي"]];
-var profile="tv";
-function $(i){return document.getElementById(i)}
+var T3=[["both","أفلام ومسلسلات"],["movie","أفلام فقط"],["series","مسلسلات فقط"]];
+var LANGS=[["","أي لغة"],["ar","العربية"],["en","الإنجليزية"],["tr","التركية"],["ko","الكورية"],["ja","اليابانية"],["hi","الهندية"],["fr","الفرنسية"],["es","الإسبانية"],["zh","الصينية"]];
+var CTRY=[["","أي دولة"],["EG","مصر"],["SA","السعودية"],["AE","الإمارات"],["KW","الكويت"],["QA","قطر"],["LB","لبنان"],["SY","سوريا"],["TR","تركيا"],["KR","كوريا"],["JP","اليابان"],["IN","الهند"],["US","أمريكا"],["GB","بريطانيا"],["FR","فرنسا"]];
+var SORTS=[["pop","الأشهر"],["rate","الأعلى تقييماً"],["new","الأحدث"],["rev","الأعلى إيراداً (أفلام)"]];
+var RATE=[["","أي تقييم"],["6","6+"],["7","7+"],["8","8+"]];
+var DT=[["movie","أفلام"],["series","مسلسلات"]];
 
-function path(){
-  var p=K?"/"+K+"/":"/", prov=$("prov").value, t=$("tok").value.replace(/[^a-zA-Z0-9_-]/g,"");
+var profile="tv", mode="mix", touched=false, order=[], checked={}, names={}, lastFocus=null;
+var ML=[], TL=[], DC=[];
+
+function $(i){return document.getElementById(i)}
+function el(tag,cls,txt){var e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e}
+function addOpt(s,v,l){var o=document.createElement("option");o.value=v;o.textContent=l;s.appendChild(o)}
+function txt(model,k,ph,type){
+  var i=el("input","ti");i.type=type||"text";i.placeholder=ph||"";i.value=model[k]||"";i.autocomplete="off";
+  i.addEventListener("input",function(){model[k]=i.value;changed(true)});return i;
+}
+function sel(model,k,opts,rerender){
+  var s=el("select","ti");for(var i=0;i<opts.length;i++)addOpt(s,opts[i][0],opts[i][1]);
+  s.value=model[k]||opts[0][0];
+  s.addEventListener("change",function(){model[k]=s.value;if(rerender)rerender();changed(false)});return s;
+}
+function rmBtn(arr,ix,rerender){
+  var b=el("button","mini","حذف");b.type="button";
+  b.addEventListener("click",function(){arr.splice(ix,1);rerender();changed(false)});return b;
+}
+
+/* ---------- التحقق (يطابق الخادم) ---------- */
+function normMdb(v){
+  v=String(v||"").trim();
+  var m=v.match(/mdblist\\.com\\/lists\\/([^\\/\\s?#]+)\\/([^\\/\\s?#]+)/i);if(m)v=m[1]+"/"+m[2];
+  return(/^\\d{1,9}$/.test(v)||/^[A-Za-z0-9_.-]{1,40}\\/[A-Za-z0-9_.-]{1,80}$/.test(v))?v:null;
+}
+function normTl(v){var m=String(v||"").match(/(\\d{1,10})/);return m?m[1]:null}
+function mdbKey(){return $("mdbkey").value.replace(/[^A-Za-z0-9]/g,"").slice(0,64)}
+function validML(){
+  if(mdbKey().length<10)return[];
+  var out=[];ML.slice(0,8).forEach(function(m){var id=normMdb(m.i);if(id)out.push({i:id,t:m.t||"both",n:(m.n||"").trim().slice(0,40)})});return out;
+}
+function validTL(){
+  if(!TMDB_ON)return[];
+  var out=[];TL.slice(0,8).forEach(function(m){var id=normTl(m.i);if(id)out.push({i:id,t:m.t||"both",n:(m.n||"").trim().slice(0,40)})});return out;
+}
+function validDC(){
+  if(!TMDB_ON)return[];
+  return DC.slice(0,8).map(function(m){
+    var o={t:m.t==="series"?"series":"movie",n:(m.n||"").trim().slice(0,40),s:m.s||"pop"};
+    if(m.g)o.g=m.g;if(m.l)o.l=m.l;if(m.c)o.c=m.c;
+    var a=parseInt(m.y1,10),b=parseInt(m.y2,10);
+    if(a>=1900&&a<=2100)o.y1=a;if(b>=1900&&b<=2100)o.y2=b;
+    if(m.p)o.p=parseInt(m.p,10);if(m.q)o.q=parseInt(m.q,10);
+    return o;
+  });
+}
+
+/* ---------- صفوف MDBList / TMDB ---------- */
+function renderML(){
+  var b=$("mlrows");b.textContent="";
+  ML.forEach(function(m,ix){
+    var r=el("div","crow");
+    r.appendChild(txt(m,"i","رابط القائمة أو مستخدم/اسم-القائمة"));
+    r.appendChild(sel(m,"t",T3));
+    r.appendChild(txt(m,"n","اسم الكتالوج (اختياري)"));
+    r.appendChild(rmBtn(ML,ix,renderML));b.appendChild(r);
+  });
+}
+function renderTL(){
+  var b=$("tlrows");b.textContent="";
+  TL.forEach(function(m,ix){
+    var r=el("div","crow");
+    r.appendChild(txt(m,"i","رقم أو رابط قائمة TMDB"));
+    r.appendChild(sel(m,"t",T3));
+    r.appendChild(txt(m,"n","اسم الكتالوج (اختياري)"));
+    r.appendChild(rmBtn(TL,ix,renderTL));b.appendChild(r);
+  });
+}
+function genreOpts(t){
+  var src=t==="series"?GT:GM,o=[["","كل التصنيفات"]];
+  for(var i=0;i<src.length;i++)o.push([String(src[i][1]),src[i][0]]);return o;
+}
+function renderDC(){
+  var b=$("dcrows");b.textContent="";
+  DC.forEach(function(m,ix){
+    var r=el("div","crow");
+    r.appendChild(txt(m,"n","اسم الكتالوج"));
+    r.appendChild(sel(m,"t",DT,function(){m.g="";renderDC()}));
+    r.appendChild(sel(m,"s",SORTS));
+    r.appendChild(sel(m,"g",genreOpts(m.t)));
+    r.appendChild(sel(m,"l",LANGS));
+    r.appendChild(sel(m,"c",CTRY));
+    r.appendChild(txt(m,"y1","من سنة","number"));
+    r.appendChild(txt(m,"y2","إلى سنة","number"));
+    var po=[["","أي منصة"]];for(var i=0;i<PROV.length;i++)po.push([String(PROV[i][1]),PROV[i][0]]);
+    r.appendChild(sel(m,"p",po));
+    r.appendChild(sel(m,"q",RATE));
+    r.appendChild(rmBtn(DC,ix,renderDC));b.appendChild(r);
+  });
+}
+
+/* ---------- جدول الكتالوجات ---------- */
+function baselineOn(r){return(mode==="tmdb"&&TMDB_ON)?!!r.m:(profile==="tv"?!!r.tv:true)}
+function tkey(t,id){return(t==="series"?"s:":"m:")+id}
+function buildRows(){
+  var rows=REG.map(function(r){return{k:r.k,ty:r.ty,n:r.n,reg:r}});
+  var types=function(t){return t==="both"?["movie","series"]:[t]};
+  validML().forEach(function(s,i){types(s.t).forEach(function(t){rows.push({k:tkey(t,"cx_ml_"+i),ty:t,n:s.n||("MDBList "+(i+1))})})});
+  validTL().forEach(function(s,i){types(s.t).forEach(function(t){rows.push({k:tkey(t,"cx_tl_"+i),ty:t,n:s.n||("قائمة TMDB "+(i+1))})})});
+  validDC().forEach(function(s,i){rows.push({k:tkey(s.t,"cx_dc_"+i),ty:s.t,n:s.n||("TMDB مخصص "+(i+1))})});
+  return rows;
+}
+function syncOrder(rows){
+  var keys={};rows.forEach(function(r){keys[r.k]=1});
+  order=order.filter(function(k){return keys[k]});
+  rows.forEach(function(r){if(order.indexOf(r.k)<0)order.push(r.k)});
+}
+function move(k,d){
+  var i=order.indexOf(k),j=i+d;if(i<0||j<0||j>=order.length)return;
+  var t=order[i];order[i]=order[j];order[j]=t;touched=true;lastFocus=k+"|"+d;renderCats();refresh();
+}
+function renderCats(){
+  var rows=buildRows();syncOrder(rows);
+  var by={};rows.forEach(function(r){by[r.k]=r});
+  var box=$("cats");box.textContent="";
+  order.forEach(function(k){
+    var r=by[k];
+    if(!touched&&r.reg)checked[k]=baselineOn(r.reg);else if(checked[k]===undefined)checked[k]=true;
+    var d=el("div","crow cat");
+    var c=document.createElement("input");c.type="checkbox";c.checked=!!checked[k];
+    c.addEventListener("change",function(){checked[k]=c.checked;touched=true;refresh()});
+    var n=el("input","ti");n.type="text";n.value=names[k]||r.n;n.maxLength=40;
+    n.addEventListener("input",function(){names[k]=n.value;touched=true;refresh()});
+    var up=el("button","mini","↑"),dn=el("button","mini","↓");
+    up.type=dn.type="button";up.setAttribute("data-f",k+"|-1");dn.setAttribute("data-f",k+"|1");
+    up.addEventListener("click",function(){move(k,-1)});dn.addEventListener("click",function(){move(k,1)});
+    d.appendChild(c);d.appendChild(el("span","tag",r.ty==="movie"?"أفلام":"مسلسلات"));d.appendChild(n);d.appendChild(up);d.appendChild(dn);
+    box.appendChild(d);
+  });
+  if(lastFocus){var f=box.querySelector('[data-f="'+lastFocus+'"]');lastFocus=null;if(f)try{f.focus()}catch(e){}}
+}
+
+/* ---------- بناء الرابط ---------- */
+function b64u(s){return btoa(unescape(encodeURIComponent(s))).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/,"")}
+function cfgObj(){
+  var c={},nm=$("aname").value.trim();
+  if(nm)c.n=nm.slice(0,30);
+  if(mode==="tmdb"&&TMDB_ON)c.m="tmdb";
+  var ml=validML();if(ml.length){c.mk=mdbKey();c.ml=ml}
+  var tl=validTL();if(tl.length)c.tl=tl;
+  var dc=validDC();if(dc.length)c.dc=dc;
+  if(touched){
+    var rows=buildRows(),def={};rows.forEach(function(r){def[r.k]=r.n});
+    c.v=order.filter(function(k){return checked[k]});
+    var r2={},any=false;
+    for(var k in names){if(def[k]!==undefined&&names[k]&&names[k].trim()&&names[k].trim()!==def[k]){r2[k]=names[k].trim().slice(0,40);any=true}}
+    if(any)c.r=r2;
+  }
+  return c;
+}
+function path(withCustom){
+  var p=K?"/"+K+"/":"/",prov=$("prov").value,t=$("tok").value.replace(/[^a-zA-Z0-9_-]/g,"");
   if(prov&&t)p+=prov+"="+t+"/";
   var c=[];
   if(profile==="tv")c.push("tv");
@@ -1127,10 +1341,14 @@ function path(){
   if($("noemoji").checked)c.push("noemoji");
   if($("lite").checked)c.push("lite");
   if(c.length)p+="cfg="+c.join(".")+"/";
+  if(withCustom!==false){
+    var o=cfgObj(),has=false;for(var x in o){has=true;break}
+    if(has){var seg=b64u(JSON.stringify(o));p+="c="+seg+"/";$("warn").textContent=seg.length>6500?"الإعدادات طويلة جداً: قلّل عدد الكتالوجات أو القوائم لضمان عمل الرابط.":""}
+    else $("warn").textContent="";
+  }
   return p;
 }
-function link(tab){return H+path()+(tab?tab+"/":"")+"manifest.json"}
-
+function link(tab){return H+path(tab?false:true)+(tab?tab+"/":"")+"manifest.json"}
 function refresh(){
   var u=link();
   $("out").textContent="https://"+u;
@@ -1138,6 +1356,7 @@ function refresh(){
   var ts=document.querySelectorAll("[data-tab]");
   for(var i=0;i<ts.length;i++)ts[i].href=secure?"stremio://"+link(ts[i].getAttribute("data-tab")):"#";
 }
+function changed(keepCats){if(!keepCats)renderCats();else renderCats();refresh()}
 function fail(){window.prompt("انسخ الرابط:","https://"+link())}
 function copy(){
   var t="https://"+link();
@@ -1146,27 +1365,40 @@ function copy(){
   }else fail();
 }
 
+/* ---------- ربط الأحداث ---------- */
 var tabsBox=$("tabs");
 TABS.forEach(function(t){
-  var a=document.createElement("a");
-  a.className="tile";a.setAttribute("data-tab",t[0]);a.href="#";a.textContent=t[1];
-  tabsBox.appendChild(a);
+  var a=el("a","tile",t[1]);a.setAttribute("data-tab",t[0]);a.href="#";tabsBox.appendChild(a);
 });
-
-var btns=document.querySelectorAll("[data-profile]");
-for(var i=0;i<btns.length;i++)btns[i].addEventListener("click",function(){
+var pb=document.querySelectorAll("[data-profile]");
+for(var i=0;i<pb.length;i++)pb[i].addEventListener("click",function(){
   profile=this.getAttribute("data-profile");
-  for(var j=0;j<btns.length;j++)btns[j].setAttribute("aria-pressed",btns[j]===this?"true":"false");
+  for(var j=0;j<pb.length;j++)pb[j].setAttribute("aria-pressed",pb[j]===this?"true":"false");
   $("noav1").checked=$("noemoji").checked=(profile==="tv");
-  refresh();
+  renderCats();refresh();
 });
-["prov","tok","maxq","maxgb","noremux","noav1","noemoji","lite"].forEach(function(id){
-  $(id).addEventListener("input",refresh);$(id).addEventListener("change",refresh);
+var mb=document.querySelectorAll("[data-mode]");
+for(var i2=0;i2<mb.length;i2++)mb[i2].addEventListener("click",function(){
+  if(this.disabled)return;
+  mode=this.getAttribute("data-mode");
+  for(var j=0;j<mb.length;j++)mb[j].setAttribute("aria-pressed",mb[j]===this?"true":"false");
+  renderCats();refresh();
 });
+["prov","tok","maxq","maxgb","noremux","noav1","noemoji","lite","aname","mdbkey"].forEach(function(id){
+  $(id).addEventListener("input",function(){if(id==="mdbkey")renderCats();refresh()});
+  $(id).addEventListener("change",function(){if(id==="mdbkey")renderCats();refresh()});
+});
+$("mlAdd").addEventListener("click",function(){ML.push({i:"",t:"both",n:""});renderML()});
+$("tlAdd").addEventListener("click",function(){if(!TMDB_ON){alert("يتطلب TMDB_API_KEY في الخادم");return}TL.push({i:"",t:"both",n:""});renderTL()});
+$("dcAdd").addEventListener("click",function(){if(!TMDB_ON){alert("يتطلب TMDB_API_KEY في الخادم");return}DC.push({n:"",t:"movie",s:"pop",g:"",l:"",c:"",y1:"",y2:"",p:"",q:""});renderDC();changed(false)});
+$("catAll").addEventListener("click",function(){touched=true;order.forEach(function(k){checked[k]=true});renderCats();refresh()});
+$("catNone").addEventListener("click",function(){touched=true;order.forEach(function(k){checked[k]=false});renderCats();refresh()});
+$("catReset").addEventListener("click",function(){touched=false;names={};order=[];checked={};renderCats();refresh()});
 $("copy").addEventListener("click",copy);
 $("install").addEventListener("click",function(e){if(!secure){e.preventDefault();copy()}});
 tabsBox.addEventListener("click",function(e){if(!secure){e.preventDefault();window.prompt("انسخ الرابط:","https://"+link(e.target.getAttribute("data-tab")))}});
-refresh();
+
+renderML();renderTL();renderDC();renderCats();refresh();
 try{$("firstFocus").focus()}catch(e){}
 
 // حماية خفيفة ضد الفحص العابر (رادع فقط؛ الأمان الحقيقي في مفتاح الوصول من جهة الخادم)
@@ -1482,6 +1714,306 @@ function getStreamList(type, id, customTorboxUrl = null) {
 }
 
 // =========================================================================
+// 9ب. تخصيص المانفيست: MDBList + قوائم TMDB + Discover مخصص + "وضع TMDB"
+// الإعدادات تُنقل في مقطع واحد من الرابط:  c=<base64url(JSON)>
+// وكلها تُفحص بصرامة (قوائم بيضاء وحدود أطوال) قبل أي استخدام
+// =========================================================================
+
+const SKIP_X = [{ name: "skip", isRequired: false }];
+
+const TM_GENRES = {
+  movie: [["حركة", 28], ["مغامرة", 12], ["رسوم متحركة", 16], ["كوميديا", 35], ["جريمة", 80], ["وثائقي", 99], ["دراما", 18], ["عائلي", 10751], ["فانتازيا", 14], ["تاريخي", 36], ["رعب", 27], ["موسيقي", 10402], ["غموض", 9648], ["رومانسي", 10749], ["خيال علمي", 878], ["إثارة", 53], ["حرب", 10752], ["غرب أمريكي", 37]],
+  tv: [["حركة ومغامرة", 10759], ["رسوم متحركة", 16], ["كوميديا", 35], ["جريمة", 80], ["وثائقي", 99], ["دراما", 18], ["عائلي", 10751], ["أطفال", 10762], ["غموض", 9648], ["أخبار", 10763], ["واقعي", 10764], ["خيال علمي وفانتازيا", 10765], ["دراما اجتماعية", 10766], ["برنامج حواري", 10767], ["حرب وسياسة", 10768], ["غرب أمريكي", 37]]
+};
+const TM_PROVIDERS = [["نتفليكس", 8], ["برايم فيديو", 9], ["ديزني+", 337], ["Apple TV+", 350], ["Max", 1899], ["Paramount+", 531], ["Hulu", 15], ["Crunchyroll", 283], ["Peacock", 386]];
+
+const TM_CATALOGS = {
+  tm_popular_movies: { type: "movie", path: "/movie/popular", disc: "/discover/movie", genres: "movie" },
+  tm_popular_series: { type: "series", path: "/tv/popular", disc: "/discover/tv", genres: "tv" },
+  tm_trending_movies: { type: "movie", path: "/trending/movie/week" },
+  tm_trending_series: { type: "series", path: "/trending/tv/week" },
+  tm_upcoming_movies: { type: "movie", path: "/movie/upcoming", region: true },
+  tm_airing_series: { type: "series", path: "/tv/on_the_air" }
+};
+
+const KEY_RE = /^[ms]:[A-Za-z0-9_-]{1,60}$/;
+const TYPE3 = new Set(["movie", "series", "both"]);
+const SORTS = new Set(["pop", "rate", "new", "rev"]);
+const clip = (s, n) => String(s ?? "").replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, n);
+
+function normMdbId(v) {
+  let s = String(v || "").trim();
+  const m = s.match(/mdblist\.com\/lists\/([^/\s?#]+)\/([^/\s?#]+)/i);
+  if (m) s = `${m[1]}/${m[2]}`;
+  return (/^\d{1,9}$/.test(s) || /^[A-Za-z0-9_.-]{1,40}\/[A-Za-z0-9_.-]{1,80}$/.test(s)) ? s : null;
+}
+function normTmdbListId(v) {
+  const m = String(v || "").match(/(\d{1,10})/);
+  return m ? m[1] : null;
+}
+const intIn = (v, a, b) => { const n = parseInt(v, 10); return Number.isInteger(n) && n >= a && n <= b ? n : 0; };
+
+function parseCustom(seg) {
+  try {
+    const raw = Buffer.from(seg, "base64url").toString("utf8");
+    if (!raw || raw.length > 6000) return null;
+    const j = JSON.parse(raw);
+    if (!j || typeof j !== "object" || Array.isArray(j)) return null;
+
+    const c = { n: clip(j.n, 30), m: j.m === "tmdb" ? "tmdb" : "mix", v: null, r: {}, mk: "", ml: [], tl: [], dc: [] };
+
+    if (Array.isArray(j.v)) c.v = j.v.slice(0, 150).map(String).filter(x => KEY_RE.test(x));
+    if (j.r && typeof j.r === "object") {
+      for (const [k, v] of Object.entries(j.r).slice(0, 150)) {
+        const nm = clip(v, 40);
+        if (KEY_RE.test(k) && nm) c.r[k] = nm;
+      }
+    }
+    const mk = String(j.mk || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 64);
+    if (mk.length >= 10) c.mk = mk;
+
+    for (const s of (Array.isArray(j.ml) ? j.ml : []).slice(0, 8)) {
+      const id = normMdbId(s?.i);
+      if (id) c.ml.push({ i: id, t: TYPE3.has(s.t) ? s.t : "both", n: clip(s.n, 40) });
+    }
+    for (const s of (Array.isArray(j.tl) ? j.tl : []).slice(0, 8)) {
+      const id = normTmdbListId(s?.i);
+      if (id) c.tl.push({ i: id, t: TYPE3.has(s.t) ? s.t : "both", n: clip(s.n, 40) });
+    }
+    for (const s of (Array.isArray(j.dc) ? j.dc : []).slice(0, 8)) {
+      if (!s || typeof s !== "object") continue;
+      const g = String(s.g || "");
+      c.dc.push({
+        t: s.t === "series" ? "series" : "movie",
+        n: clip(s.n, 40),
+        s: SORTS.has(s.s) ? s.s : "pop",
+        g: /^\d{1,6}(,\d{1,6}){0,3}$/.test(g) ? g : "",
+        l: /^[a-z]{2,3}$/.test(String(s.l || "")) ? s.l : "",
+        c: /^[A-Z]{2}$/.test(String(s.c || "")) ? s.c : "",
+        y1: intIn(s.y1, 1900, 2100), y2: intIn(s.y2, 1900, 2100),
+        p: intIn(s.p, 1, 99999),
+        rg: /^[A-Z]{2}$/.test(String(s.rg || "")) ? s.rg : "",
+        q: intIn(s.q, 1, 9)
+      });
+    }
+    c.hk = hashStr(JSON.stringify([c.m, c.mk, c.ml, c.tl, c.dc]));
+    return c;
+  } catch {
+    return null;
+  }
+}
+
+// ---- سجل الكتالوجات المدمجة (للمانفيست ولصفحة التخصيص) ----
+function catalogRegistry(countryName) {
+  const R = [];
+  const add = (type, id, name, f = {}) => R.push({
+    type, id, name, extra: f.extra || SKIP_X,
+    tv: Boolean(f.tv), tmdb: Boolean(f.tmdb), m: Boolean(f.m), src: f.src || "core"
+  });
+  const genreExtra = k => [{ name: "genre", isRequired: false, options: TM_GENRES[k].map(g => g[0]), optionsLimit: 1 }, ...SKIP_X];
+  const searchGenre = (opts) => [
+    { name: "search", isRequired: false },
+    { name: "genre", isRequired: false, options: opts },
+    ...SKIP_X
+  ];
+
+  add("movie", "top10_region_movies", `Movies - أفضل 10 في ${countryName}`, { extra: [], tv: true });
+  add("series", "top10_region_series", `Series - أفضل 10 في ${countryName}`, { extra: [], tv: true });
+  add("movie", "trending_daily_movies", "Movies - ترند اليوم", { tv: true });
+  add("series", "trending_daily_series", "Series - ترند اليوم", { tv: true });
+  add("movie", "arabic_movies_spotlight", "أفلام سينمائية عربية", { tv: true });
+  add("series", "arabic_series_spotlight", "مسلسلات عربية شهيرة", { tv: true });
+  add("series", "anime_trending", "أنمي - رائج ومميز", { tv: true });
+  add("movie", "onetake2_movies_main", "Movies - كل الأفلام", { extra: searchGenre(NV_MOVIE_GENRES), tv: true, m: true });
+  add("series", "onetake2_series_main", "Series - كل المسلسلات", { extra: searchGenre(NV_SERIES_GENRES), tv: true, m: true });
+
+  add("series", "egyptian_series_spotlight", "مسلسلات مصرية", { tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("series", "gulf_series_spotlight", "مسلسلات خليجية", { tmdb: true, m: true, src: "tmdb" });
+  add("series", "turkish_dramas_spotlight", "مسلسلات الدراما التركية", { tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("series", "kdrama_spotlight", "مسلسلات الدراما الكورية (K-Drama)", { tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("movie", "now_playing_movies", "أفلام في دور العرض الآن", { tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("movie", "top_rated_movies", "أفلام الأعلى تقييماً", { tmdb: true, m: true, src: "tmdb" });
+  add("series", "top_rated_series", "مسلسلات الأعلى تقييماً", { tmdb: true, m: true, src: "tmdb" });
+
+  add("movie", "tm_popular_movies", "TMDB - أفلام شائعة", { extra: genreExtra("movie"), tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("series", "tm_popular_series", "TMDB - مسلسلات شائعة", { extra: genreExtra("tv"), tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("movie", "tm_trending_movies", "TMDB - أفلام رائجة هذا الأسبوع", { tmdb: true, m: true, src: "tmdb" });
+  add("series", "tm_trending_series", "TMDB - مسلسلات رائجة هذا الأسبوع", { tmdb: true, m: true, src: "tmdb" });
+  add("movie", "tm_upcoming_movies", "TMDB - أفلام قادمة", { tmdb: true, m: true, src: "tmdb" });
+  add("series", "tm_airing_series", "TMDB - مسلسلات تُعرض حالياً", { tmdb: true, m: true, src: "tmdb" });
+
+  nuvioCatalogs().forEach(c => R.push({
+    type: c.type, id: c.id, name: c.name, extra: c.extra,
+    tv: TV_NUVIO.has(c.id.slice(6)), tmdb: false, m: false, src: "nuvio"
+  }));
+  return R;
+}
+
+function baselineCatalogs(reg, o, tmdbOn) {
+  const tmode = tmdbOn && o.cc?.m === "tmdb";
+  return reg.filter(c => (!c.tmdb || tmdbOn) && (tmode ? c.m : (!o.tv || c.tv)));
+}
+
+function customCatalogs(cc, tmdbOn) {
+  const out = [];
+  if (!cc) return out;
+  const types = t => (t === "both" ? ["movie", "series"] : [t]);
+  const mk = (type, id, name) => ({ type, id, name, extra: SKIP_X, tmdb: false, m: false, src: "custom", tv: true });
+  cc.ml.forEach((s, i) => { if (cc.mk) for (const t of types(s.t)) out.push(mk(t, `cx_ml_${i}`, s.n || `MDBList ${i + 1}`)); });
+  if (tmdbOn) {
+    cc.tl.forEach((s, i) => { for (const t of types(s.t)) out.push(mk(t, `cx_tl_${i}`, s.n || `قائمة TMDB ${i + 1}`)); });
+    cc.dc.forEach((s, i) => out.push(mk(s.t, `cx_dc_${i}`, s.n || `TMDB مخصص ${i + 1}`)));
+  }
+  return out;
+}
+
+const catKey = c => `${c.type[0]}:${c.id}`;
+
+// =========================================================================
+// المحركات: MDBList / قوائم TMDB / Discover / وضع TMDB
+// =========================================================================
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const genreIdByName = (kind, name) => (TM_GENRES[kind].find(g => g[0] === name) || [])[1];
+
+function dcQuery(s, countryCode) {
+  const tv = s.t === "series";
+  const dk = tv ? "first_air_date" : "primary_release_date";
+  const p = [];
+  p.push(`sort_by=${s.s === "rate" ? "vote_average.desc" : s.s === "new" ? dk + ".desc" : (s.s === "rev" && !tv) ? "revenue.desc" : "popularity.desc"}`);
+  if (s.s === "rate") p.push("vote_count.gte=300");
+  if (s.s === "new") p.push("vote_count.gte=3");
+  p.push("include_adult=false");
+  if (s.g) p.push(`with_genres=${s.g}`);
+  if (s.l) p.push(`with_original_language=${s.l}`);
+  if (s.c) p.push(`with_origin_country=${s.c}`);
+  if (s.y1) p.push(`${dk}.gte=${s.y1}-01-01`);
+  if (s.y2) p.push(`${dk}.lte=${s.y2}-12-31`);
+  else if (s.s === "new") p.push(`${dk}.lte=${todayStr()}`);
+  if (s.p) {
+    const rg = s.rg || (/^[A-Z]{2}$/.test(countryCode) ? countryCode : "SA");
+    p.push(`with_watch_providers=${s.p}`, `watch_region=${rg}`, "with_watch_monetization_types=flatrate%7Cfree%7Cads");
+  }
+  if (s.q) p.push(`vote_average.gte=${s.q}`);
+  return p.join("&");
+}
+
+async function tmdbListCatalog(spec, type, skip) {
+  const page = Math.min(Math.floor(skip / 20) + 1, 20);
+  const data = await safeFetchJson(tmdbUrl(`/list/${spec.i}`, `language=ar-SA&page=${page}`), {}, 4000);
+  const want = type === "series" ? "tv" : "movie";
+  return (data?.items || [])
+    .filter(r => (r.media_type || (r.title ? "movie" : "tv")) === want)
+    .map(r => tmdbToMeta(r, type, ""))
+    .filter(Boolean);
+}
+
+function mdbCollect(data, type) {
+  let items = [];
+  if (Array.isArray(data)) items = data;
+  else if (data && typeof data === "object") {
+    items = [
+      ...(Array.isArray(data.movies) ? data.movies : []).map(x => ({ mediatype: "movie", ...x })),
+      ...(Array.isArray(data.shows) ? data.shows : []).map(x => ({ mediatype: "show", ...x }))
+    ];
+  }
+  const want = type === "series" ? "show" : "movie";
+  return items
+    .filter(x => x && typeof x === "object" && String(x.mediatype || x.media_type || "").replace(/^(tv|series)$/, "show") === want)
+    .sort((a, b) => (Number(a.rank) || 1e9) - (Number(b.rank) || 1e9));
+}
+
+// نجلب القائمة مرة واحدة (حتى 300 عنصر) ونقسّمها محلياً → طلب واحد لكل قائمة كل 6 ساعات
+// (الحصة المجانية في MDBList محدودة يومياً)
+async function mdbListMetas(key, spec, type, skip, o) {
+  if (!key) return [];
+  const ck = `mdb_v1_${hashStr(spec.i)}_${hashStr(key)}`;
+  let data = getFromCache(ck, false);
+  if (!data) {
+    data = await safeFetchJson(`https://api.mdblist.com/lists/${spec.i}/items?apikey=${encodeURIComponent(key)}&limit=300`, {}, 7000);
+    if (data) saveToCache(ck, data, 6 * 60 * 60 * 1000);
+  }
+  if (!data) return [];
+
+  const page = mdbCollect(data, type).slice(skip, skip + 40);
+  const posterSize = o.tv ? "small" : "medium";
+  const metas = await mapLimit(page, 6, async x => {
+    const imdb = /^tt\d+$/.test(String(x.imdb_id || "")) ? x.imdb_id : null;
+    if (imdb) {
+      return {
+        id: imdb, type, name: stripAllEmojis(String(x.title || imdb)),
+        poster: `https://images.metahub.space/poster/${posterSize}/${imdb}/img`,
+        posterShape: "poster",
+        releaseInfo: x.release_year ? String(x.release_year) : ""
+      };
+    }
+    // عنصر بلا IMDb: نكمله من TMDB إن وُجد مفتاحه، وإلا نتجاهله
+    if (TMDB_API_KEY && Number.isInteger(Number(x.id)) && Number(x.id) > 0) {
+      const tvType = type === "series";
+      const r = await safeFetchJson(tmdbUrl(`/${tvType ? "tv" : "movie"}/${Number(x.id)}`, "language=ar-SA"), {}, 3500);
+      return r ? tmdbToMeta(r, type, "") : null;
+    }
+    return null;
+  });
+  return metas.filter(Boolean);
+}
+
+function finishMetas(metas, o) {
+  return { metas: metas.slice(0, o.catMax).map(m => shapeCatalogMeta(m, o)) };
+}
+
+// يعيد null إذا لم يكن الكتالوج من النوع الخاص (فيكمل المسار العادي)
+async function specialCatalog(type, id, extra, o, countryCode) {
+  const cc = o.cc;
+  const tmdbOn = Boolean(TMDB_API_KEY);
+  const skip = Math.max(0, parseInt(extra.skip, 10) || 0);
+
+  const mc = id.match(/^cx_(ml|tl|dc)_(\d{1,2})$/);
+  if (mc) {
+    const spec = cc?.[mc[1]]?.[Number(mc[2])];
+    if (!spec) return { metas: [] };
+    if (mc[1] === "ml") return finishMetas(await mdbListMetas(cc.mk, spec, type, skip, o), o);
+    if (!tmdbOn) return { metas: [] };
+    if (mc[1] === "tl") return finishMetas(await tmdbListCatalog(spec, type, skip), o);
+    if (spec.t !== type) return { metas: [] };
+    const path = `/discover/${type === "series" ? "tv" : "movie"}`;
+    return finishMetas(await tmdbListMetas(path, dcQuery(spec, countryCode), type, "", extra), o);
+  }
+
+  if (!tmdbOn) return null;
+
+  const tm = TM_CATALOGS[id];
+  if (tm) {
+    let path = tm.path, qs = tm.region && /^[A-Z]{2}$/.test(countryCode) ? `region=${countryCode}` : "";
+    const gid = tm.genres && extra.genre ? genreIdByName(tm.genres, extra.genre) : null;
+    if (gid) { path = tm.disc; qs = `sort_by=popularity.desc&include_adult=false&with_genres=${gid}`; }
+    return finishMetas(await tmdbListMetas(path, qs, tm.type, "", extra), o);
+  }
+
+  // وضع TMDB: "كل الأفلام/المسلسلات" تعتمد على TMDB (بحث بأي لغة + تصنيفات عربية)
+  if (cc?.m === "tmdb" && (id === "onetake2_movies_main" || id === "onetake2_series_main")) {
+    const isSeries = id === "onetake2_series_main";
+    const t = isSeries ? "series" : "movie";
+    if (extra.search) {
+      const page = Math.min(Math.floor(skip / 20) + 1, 20);
+      const data = await safeFetchJson(
+        tmdbUrl(`/search/${isSeries ? "tv" : "movie"}`, `language=ar-SA&include_adult=false&page=${page}&query=${encodeURIComponent(extra.search)}`),
+        {}, 3500
+      );
+      return finishMetas((data?.results || []).map(r => tmdbToMeta(r, t, "")).filter(Boolean), o);
+    }
+    const gid = extra.genre ? genreIdByName(isSeries ? "tv" : "movie", extra.genre) : null;
+    const path = isSeries ? "/tv/popular" : "/movie/popular";
+    const metas = gid
+      ? await tmdbListMetas(isSeries ? "/discover/tv" : "/discover/movie", `sort_by=popularity.desc&include_adult=false&with_genres=${gid}`, t, "", extra)
+      : await tmdbListMetas(path, "", t, "", extra);
+    return finishMetas(metas, o);
+  }
+  return null;
+}
+
+
+// =========================================================================
 // 10. الحماية، الخيارات، والكتالوجات
 // =========================================================================
 
@@ -1627,6 +2159,9 @@ async function catalogPayload(type, catalogId, extra, o, countryCode) {
   const search = extra.search || "";
   const finish = metas => ({ metas: metas.slice(0, o.catMax).map(m => shapeCatalogMeta(m, o)) });
 
+  const special = await specialCatalog(type, catalogId, extra, o, countryCode);
+  if (special) return special;
+
   // 1. الأنمي
   if (catalogId === "anime_trending") {
     const suffix = skip ? `/skip=${skip}.json` : ".json";
@@ -1740,46 +2275,47 @@ function buildManifest(o, tab, countryName) {
     };
   }
 
+  const cc = o.cc;
   const tmdbOn = Boolean(TMDB_API_KEY);
-  const skipX = [{ name: "skip", isRequired: false }];
-  const cat = (type, id, name, extra = skipX) => ({ type, id, name, extra });
+  const tmode = tmdbOn && cc?.m === "tmdb";
+  const reg = catalogRegistry(countryName).filter(c => !c.tmdb || tmdbOn);
 
-  const catalogs = [
-    cat("movie", "top10_region_movies", `Movies - أفضل 10 في ${countryName}`, []),
-    cat("series", "top10_region_series", `Series - أفضل 10 في ${countryName}`, []),
-    cat("movie", "trending_daily_movies", "Movies - ترند اليوم"),
-    cat("series", "trending_daily_series", "Series - ترند اليوم"),
-    cat("movie", "arabic_movies_spotlight", "أفلام سينمائية عربية"),
-    cat("series", "arabic_series_spotlight", "مسلسلات عربية شهيرة"),
-    ...(tmdbOn ? [
-      cat("series", "egyptian_series_spotlight", "مسلسلات مصرية"),
-      cat("series", "gulf_series_spotlight", "مسلسلات خليجية"),
-      cat("series", "turkish_dramas_spotlight", "مسلسلات الدراما التركية"),
-      cat("series", "kdrama_spotlight", "مسلسلات الدراما الكورية (K-Drama)"),
-      cat("movie", "now_playing_movies", "أفلام في دور العرض الآن"),
-      cat("movie", "top_rated_movies", "أفلام الأعلى تقييماً"),
-      cat("series", "top_rated_series", "مسلسلات الأعلى تقييماً")
-    ] : []),
-    cat("series", "anime_trending", "أنمي - رائج ومميز"),
-    cat("movie", "onetake2_movies_main", "Movies - كل الأفلام", [
-      { name: "search", isRequired: false },
-      { name: "genre", isRequired: false, options: NV_MOVIE_GENRES },
-      { name: "skip", isRequired: false }
-    ]),
-    cat("series", "onetake2_series_main", "Series - كل المسلسلات", [
-      { name: "search", isRequired: false },
-      { name: "genre", isRequired: false, options: NV_SERIES_GENRES },
-      { name: "skip", isRequired: false }
-    ]),
-    ...nuvioCatalogs().filter(c => !o.tv || TV_NUVIO.has(c.id.slice(6)))
-  ];
+  if (tmode) {
+    for (const c of reg) {
+      if (c.id === "onetake2_movies_main") c.extra = [{ name: "search", isRequired: false }, { name: "genre", isRequired: false, options: TM_GENRES.movie.map(g => g[0]), optionsLimit: 1 }, ...SKIP_X];
+      if (c.id === "onetake2_series_main") c.extra = [{ name: "search", isRequired: false }, { name: "genre", isRequired: false, options: TM_GENRES.tv.map(g => g[0]), optionsLimit: 1 }, ...SKIP_X];
+    }
+  }
+
+  const customs = customCatalogs(cc, tmdbOn);
+  const byKey = new Map([...reg, ...customs].map(c => [catKey(c), c]));
+  let list;
+  if (cc && Array.isArray(cc.v)) {
+    list = cc.v.map(k => byKey.get(k)).filter(Boolean);
+    const have = new Set(list.map(catKey));
+    for (const c of customs) if (!have.has(catKey(c))) list.push(c);
+  } else {
+    list = [...baselineCatalogs(reg, o, tmdbOn), ...customs];
+  }
+
+  const seen = new Set();
+  const catalogs = [];
+  for (const c of list) {
+    const k = catKey(c);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const out = { type: c.type, id: c.id, name: cc?.r?.[k] || c.name };
+    if (!(Array.isArray(c.extra) && c.extra.length === 0)) out.extra = c.extra;
+    catalogs.push(out);
+    if (catalogs.length >= 120) break;
+  }
 
   const idSuffix = o.tv ? (o.lite ? "tv.lite" : "tv") : (o.lite ? "lite" : "main");
   return {
     id: `app.onetake2.${idSuffix}`,
     version: VERSION,
-    name: o.tv ? `${ADDON_NAME} TV` : ADDON_NAME,
-    description: "1take2 - تعريب كامل للقصص والحلقات والتصنيفات، بحث عربي، دعم TMDB و IMDb، وترجمات عربية",
+    name: cc?.n || (o.tv ? `${ADDON_NAME} TV` : ADDON_NAME),
+    description: "1take2 - تعريب كامل للقصص والحلقات والتصنيفات، بحث عربي، دعم TMDB و IMDb و MDBList، وترجمات عربية",
     resources: o.lite ? ["catalog", "meta", "subtitles"] : ["catalog", "meta", "subtitles", "stream"],
     types: ["movie", "series", "anime"],
     idPrefixes: ["tt", "kitsu:", "tmdb:", "tmdb"],
@@ -1848,7 +2384,7 @@ export default async function handler(req, res) {
     const rest = rawRest.map(safeDecode);
 
     // ---- المعدّلات: ديبريد / خيارات / تبويب (بأي ترتيب) ----
-    let debrid = null, cfgTokens = [], tab = null;
+    let debrid = null, cfgTokens = [], tab = null, custom = null;
     const flags = {};
     let i = 0;
     for (; i < rest.length; i++) {
@@ -1856,12 +2392,14 @@ export default async function handler(req, res) {
       let m;
       if ((m = s.match(SEG_DEBRID))) debrid = { provider: m[1].toLowerCase(), token: m[2] };
       else if ((m = s.match(SEG_CFG))) cfgTokens = m[1].toLowerCase().split(".").filter(Boolean);
+      else if ((m = s.match(/^c=([A-Za-z0-9_-]{2,7000})$/))) custom = parseCustom(m[1]);
       else if (/^(lite|nostream)$/i.test(s)) flags.lite = true;
       else if (/^tv$/i.test(s)) flags.tv = true;
       else if (SEG_TAB.test(s)) { const r = s.toLowerCase(); tab = TAB_ALIAS[r] || r; }
       else break;
     }
     const o = buildOptions(flags, cfgTokens);
+    o.cc = custom;
     const tail = rest.slice(i);
     const rawTail = rawRest.slice(i);
     const route = (tail[0] || "").replace(/\.json$/i, "").toLowerCase();
@@ -1882,7 +2420,7 @@ export default async function handler(req, res) {
       res.setHeader("Cache-Control", "no-store");
       res.setHeader("Content-Security-Policy",
         `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
-      return res.status(200).send(renderConfigPage(host, ACCESS_KEY, nonce));
+      return res.status(200).send(renderConfigPage(host, ACCESS_KEY, nonce, getUserRegionInfo(req).countryName));
     }
 
     // ---- الفحص الصحي (معطّل افتراضياً) ----
@@ -1907,7 +2445,7 @@ export default async function handler(req, res) {
       const extra = parseExtra(extraRaw || queryPart);
       const { countryCode } = getUserRegionInfo(req);
       const daySeed = Math.floor(Date.now() / (12 * 60 * 60 * 1000));
-      const cacheKey = `cat_v21_${o.tv ? "tv" : "d"}_${o.catMax}_${type}_${id}_${countryCode}_${daySeed}_${upstreamExtraSuffix(extra)}`;
+      const cacheKey = `cat_v21_${o.tv ? "tv" : "d"}_${o.cc ? o.cc.hk : "x"}_${o.catMax}_${type}_${id}_${countryCode}_${daySeed}_${upstreamExtraSuffix(extra)}`;
 
       const fresh = getFromCache(cacheKey, false);
       if (fresh) return res.status(200).json(fresh);
