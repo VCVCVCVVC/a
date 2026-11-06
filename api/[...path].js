@@ -19,6 +19,7 @@
 
 import { timingSafeEqual, randomBytes } from "node:crypto";
 import zlib from "node:zlib";
+import { AsyncLocalStorage } from "node:async_hooks";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { resolve as resolvePath } from "node:path";
@@ -38,11 +39,18 @@ const TMDB_API_KEY = (process.env.TMDB_API_KEY || "").trim();
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const TMDB_IMG = "https://image.tmdb.org/t/p";
 
+// مفتاح TMDB: يُفضَّل مفتاح المستخدم (من رابط إضافته)، ثم مفتاح الخادم الاحتياطي إن وُجد
+const reqCtx = new AsyncLocalStorage();
+const tmdbKey = () => reqCtx.getStore()?.tmdbKey || TMDB_API_KEY;
+const hasTmdb = () => Boolean(tmdbKey());
+const metaTag = () => (hasTmdb() ? "t1" : "t0");
+
 const NUVIO_URL = (process.env.NUVIO_URL || "https://catalog.nuvio.tv").replace(/\/manifest\.json$/i, "").replace(/\/+$/, "");
 
 const TORRENTIO = "https://torrentio.strem.fun";
 const TORBOX_TOKEN = (process.env.TORBOX_TOKEN || "").replace(/[^a-zA-Z0-9_-]/g, "");
-const DEFAULT_UPSTREAM = `${TORRENTIO}/qualityfilter=scr,cam${TORBOX_TOKEN ? `|torbox=${TORBOX_TOKEN}` : ""}`;
+// في الوضع العام (بدون ACCESS_KEY) لا يُستخدم توكن صاحب الموقع لأحد: كل مستخدم يضع حسابه
+const DEFAULT_UPSTREAM = `${TORRENTIO}/qualityfilter=scr,cam${TORBOX_TOKEN && KEY_ON ? `|torbox=${TORBOX_TOKEN}` : ""}`;
 const UPSTREAM_URL = (process.env.UPSTREAM_URL || DEFAULT_UPSTREAM).replace(/\/manifest\.json$/i, "").replace(/\/+$/, "");
 
 const ENABLE_P2P = process.env.ENABLE_P2P !== "0";
@@ -73,7 +81,14 @@ const UPSTREAM_ADDONS = {
 // 0. ملفات التعريف والخيارات (TV / موبايل / توفير بيانات)
 // =========================================================================
 
+const SUB_LANGS = {
+  ara: /^(ara|ar|arb|arabic|ar-[a-z]{2})$/i, eng: /^(eng|en|english)$/i, fre: /^(fre|fra|fr|french)$/i,
+  spa: /^(spa|es|spanish)$/i, tur: /^(tur|tr|turkish)$/i, ger: /^(ger|deu|de|german)$/i,
+  por: /^(por|pt|portuguese)$/i, per: /^(per|fas|fa|persian)$/i
+};
+
 const DEFAULT_OPTS = {
+  subLangs: [], country: "",
   tv: false, lite: false,
   maxRank: 0,          // 0 = بلا حد | 2=720p | 3=1080p | 4=4K
   maxGB: 0,            // 0 = بلا حد
@@ -94,7 +109,7 @@ const TV_DEFAULTS = {
 };
 
 function buildOptions(flags = {}, tokens = []) {
-  const o = { ...DEFAULT_OPTS };
+  const o = { ...DEFAULT_OPTS, subLangs: [] };
   if (flags.tv || tokens.includes("tv")) Object.assign(o, TV_DEFAULTS);
   if (flags.lite) o.lite = true;
   for (const tk of tokens) {
@@ -106,6 +121,8 @@ function buildOptions(flags = {}, tokens = []) {
     else if ((m = tk.match(/^m(4k|1080|720)$/))) o.maxRank = { "4k": 4, "1080": 3, "720": 2 }[m[1]];
     else if ((m = tk.match(/^gb(\d{1,3})$/))) o.maxGB = Number(m[1]);
     else if ((m = tk.match(/^n(\d{1,2})$/))) o.maxStreams = Math.max(3, Math.min(60, Number(m[1])));
+    else if ((m = tk.match(/^sl([a-z]{3})$/)) && SUB_LANGS[m[1]]) { if (!o.subLangs.includes(m[1])) o.subLangs.push(m[1]); }
+    else if ((m = tk.match(/^ct([a-z]{2})$/)) && REGION_NAMES_AR[m[1].toUpperCase()]) o.country = m[1].toUpperCase();
   }
   return o;
 }
@@ -257,7 +274,7 @@ async function safeFetchJson(url, headers = {}, customTimeout = TIMEOUT_MS) {
       }
 
       if (!res.ok) {
-        if (res.status !== 404 && res.status !== 400) recordProviderStatus(host, false);
+        if (![400, 401, 403, 404, 422].includes(res.status)) recordProviderStatus(host, false); // مفاتيح المستخدمين الخاطئة لا تُسقط المزوّد للجميع
         return null;
       }
 
@@ -570,8 +587,9 @@ function cachedArabic(text) {
 // =========================================================================
 
 function tmdbUrl(path, qs = "") {
-  if (!TMDB_API_KEY) return null;
-  return `${TMDB_BASE}${path}?${qs ? qs + "&" : ""}api_key=${TMDB_API_KEY}`;
+  const k = tmdbKey();
+  if (!k) return null;
+  return `${TMDB_BASE}${path}?${qs ? qs + "&" : ""}api_key=${k}`;
 }
 
 function trimText(s, max) {
@@ -634,7 +652,7 @@ function shapeMeta(meta, o) {
 }
 
 async function fetchTmdbArabic(type, rawId, seasons = []) {
-  if (!rawId || !TMDB_API_KEY) return null;
+  if (!rawId || !hasTmdb()) return null;
   const id = String(rawId).trim();
   const seasonKey = seasons.length ? `${seasons[0]}-${seasons[seasons.length - 1]}-${seasons.length}` : "0";
   const cacheKey = `tmdb_ar_v21_${type}_${id}_${seasonKey}`;
@@ -808,8 +826,9 @@ const REGION_NAMES_AR = {
   TR: "تركيا", US: "أمريكا", GB: "بريطانيا", DE: "ألمانيا", FR: "فرنسا"
 };
 
-function getUserRegionInfo(req) {
+function getUserRegionInfo(req, override = "") {
   const countryCode = (
+    override ||
     req.headers["x-vercel-ip-country"] ||
     req.headers["cf-ipcountry"] ||
     "SA"
@@ -1015,10 +1034,10 @@ function jsJson(v) {
 }
 
 function renderConfigPage(host, key, nonce, countryName = "منطقتك") {
-  const tmdbOn = Boolean(TMDB_API_KEY);
+  const srvTmdb = Boolean(TMDB_API_KEY);
   const reg = catalogRegistry(countryName)
-    .filter(c => !c.tmdb || tmdbOn)
-    .map(c => ({ k: catKey(c), ty: c.type, n: c.name, tv: c.tv ? 1 : 0, m: c.m ? 1 : 0 }));
+    .map(c => ({ k: catKey(c), ty: c.type, n: c.name, tv: c.tv ? 1 : 0, m: c.m ? 1 : 0, g: c.tmdb ? 1 : 0 }));
+  const countries = Object.entries(REGION_NAMES_AR);
 
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -1071,9 +1090,16 @@ summary{cursor:pointer;padding:12px 14px;border-radius:12px;border:2px solid var
 </head>
 <body>
 <main class="card">
-  <span class="badge">v${VERSION} • نسخة خاصة</span>
+  <span class="badge">v${VERSION} • ${KEY_ON ? "نسخة خاصة" : "خصّص إضافتك"}</span>
   <h1>إضافة <span>${ADDON_NAME}</span></h1>
-  <p class="lead">اختر جهازك وخياراتك ثم ثبّت الإضافة. الرابط الناتج يحمل إعداداتك (وربما مفاتيحك) — لا تشاركه.</p>
+  <p class="lead">اختر جهازك، أدخل مفاتيحك الخاصة، خصّص كل شيء ثم ثبّت الإضافة. الرابط الناتج يحمل إعداداتك ومفاتيحك — لا تشاركه.</p>
+  <details>
+    <summary>لديك رابط إضافة سابق؟ استورد إعداداتك</summary>
+    <label class="l" for="impurl">الصق رابط المانفيست (أو رابط زر الإعداد)</label>
+    <input type="text" id="impurl" class="ti" autocomplete="off" spellcheck="false" placeholder="https://.../manifest.json">
+    <button class="mini" type="button" id="impbtn">استيراد</button>
+    <div class="hint" id="impmsg"></div>
+  </details>
 
   <h2>1. الجهاز</h2>
   <div class="row">
@@ -1082,8 +1108,13 @@ summary{cursor:pointer;padding:12px 14px;border-radius:12px;border:2px solid var
     <button class="opt" data-profile="saver" aria-pressed="false">توفير بيانات<small>حد 720p • قائمة أقصر</small></button>
   </div>
 
-  <h2>2. حساب الديبريد (اختياري)</h2>
-  <label class="l" for="prov">المزود</label>
+  <h2>2. مفاتيحك الخاصة</h2>
+  <p class="hint">تبقى المفاتيح داخل رابط إضافتك أنت فقط ولا تُحفظ في قاعدة بيانات. مضيف الموقع قد يرى الروابط في سجلات الطلبات، فاستخدم موقعاً تثق به.</p>
+  <label class="l" for="tmdbkey">مفتاح TMDB (v3) — مجاني من themoviedb.org/settings/api</label>
+  <input type="password" id="tmdbkey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="يفعّل التعريب الرسمي، وضع TMDB، والقوائم المخصصة">
+  <label class="l" for="mdbkey">مفتاح MDBList (اختياري) — من mdblist.com/preferences</label>
+  <input type="password" id="mdbkey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="لقوائم MDBList">
+  <label class="l" for="prov">حساب الديبريد (اختياري)</label>
   <select id="prov">
     <option value="">الخادم الافتراضي (ضبط الخادم)</option>
     <option value="torbox">TorBox</option>
@@ -1117,16 +1148,22 @@ summary{cursor:pointer;padding:12px 14px;border-radius:12px;border:2px solid var
   <label class="chk"><input type="checkbox" id="noemoji" checked> إخفاء الإيموجي من أسماء الروابط</label>
   <label class="chk"><input type="checkbox" id="lite"> بدون روابط بث (استخدام إضافة بث أخرى)</label>
 
-  <h2>4. هوية الإضافة ومصدر الكتالوجات</h2>
+  <h2>4. الترجمات والمنطقة</h2>
+  <p class="hint">العربية دائماً أولاً. اختر لغات إضافية إن أردت.</p>
+  <div id="subs"></div>
+  <label class="l" for="ctry">المنطقة (لقائمة أفضل 10 وأفلام دور العرض)</label>
+  <select id="ctry"><option value="">تلقائي (حسب موقعك)</option>${countries.map(([c, n]) => `<option value="${c.toLowerCase()}">${n}</option>`).join("")}</select>
+
+  <h2>5. هوية الإضافة ومصدر الكتالوجات</h2>
   <label class="l" for="aname">اسم الإضافة في Stremio (اختياري)</label>
   <input type="text" id="aname" maxlength="30" autocomplete="off" placeholder="${ADDON_NAME}">
   <label class="l">مصدر الكتالوجات</label>
   <div class="row">
     <button class="opt" data-mode="mix" aria-pressed="true">مختلط<small>Nuvio + Cinemeta + TMDB</small></button>
-    <button class="opt" data-mode="tmdb" aria-pressed="false"${tmdbOn ? "" : " disabled"}>وضع TMDB<small>${tmdbOn ? "كتالوجات TMDB فقط + بحث بأي لغة" : "يتطلب TMDB_API_KEY في الخادم"}</small></button>
+    <button class="opt" data-mode="tmdb" aria-pressed="false" id="modeTmdb"${srvTmdb ? "" : " disabled"}>وضع TMDB<small id="modeHint">${srvTmdb ? "كتالوجات TMDB فقط + بحث بأي لغة" : "أدخل مفتاح TMDB أولاً"}</small></button>
   </div>
 
-  <h2>5. الكتالوجات (إظهار / ترتيب / إعادة تسمية)</h2>
+  <h2>6. الكتالوجات (إظهار / ترتيب / إعادة تسمية)</h2>
   <details>
     <summary>تخصيص قائمة الكتالوجات</summary>
     <div class="tools">
@@ -1137,36 +1174,35 @@ summary{cursor:pointer;padding:12px 14px;border-radius:12px;border:2px solid var
     <div class="cats" id="cats"></div>
   </details>
 
-  <h2>6. قوائم MDBList</h2>
-  <p class="hint">أدخل مفتاح MDBList من mdblist.com/preferences ثم رابط أي قائمة (مثل mdblist.com/lists/مستخدم/قائمة).</p>
-  <input type="password" id="mdbkey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="مفتاح MDBList">
+  <h2>7. قوائم MDBList</h2>
+  <p class="hint">أدخل مفتاح MDBList في قسم المفاتيح أعلاه، ثم رابط أي قائمة (مثل mdblist.com/lists/مستخدم/قائمة).</p>
   <div id="mlrows"></div>
   <button class="addb" type="button" id="mlAdd">+ إضافة قائمة MDBList</button>
 
-  <h2>7. قوائم TMDB</h2>
-  <p class="hint">${tmdbOn ? "رقم قائمة TMDB أو رابطها (themoviedb.org/list/رقم)." : "تتطلب TMDB_API_KEY في الخادم."}</p>
+  <h2>8. قوائم TMDB</h2>
+  <p class="hint">رقم قائمة TMDB أو رابطها (themoviedb.org/list/رقم). يتطلب مفتاح TMDB.</p>
   <div id="tlrows"></div>
   <button class="addb" type="button" id="tlAdd">+ إضافة قائمة TMDB</button>
 
-  <h2>8. كتالوج TMDB مخصص (Discover)</h2>
-  <p class="hint">${tmdbOn ? "ابنِ كتالوجك: النوع، الترتيب، التصنيف، اللغة، الدولة، السنوات، منصة المشاهدة، أدنى تقييم." : "يتطلب TMDB_API_KEY في الخادم."}</p>
+  <h2>9. كتالوج TMDB مخصص (Discover)</h2>
+  <p class="hint">ابنِ كتالوجك: النوع، الترتيب، التصنيف، اللغة، الدولة، السنوات، منصة المشاهدة، أدنى تقييم. يتطلب مفتاح TMDB.</p>
   <div id="dcrows"></div>
   <button class="addb" type="button" id="dcAdd">+ إضافة كتالوج مخصص</button>
 
-  <h2>9. التثبيت</h2>
+  <h2>10. التثبيت</h2>
   <a class="btn btn-gold" id="install" href="#">تثبيت ${ADDON_NAME} في Stremio</a>
   <button class="btn btn-dark" id="copy" type="button">نسخ رابط المانفيست</button>
   <div id="warn"></div>
   <div id="out"></div>
 
-  <h2>10. تبويبات الجودة (اختياري)</h2>
+  <h2>11. تبويبات الجودة (اختياري)</h2>
   <div class="row" id="tabs"></div>
 
   <div class="note">للتلفاز: اضغط «نسخ» وافتح الرابط من هاتفك لتثبيته على Stremio عبر نفس الحساب، أو اكتب الرابط يدوياً في خانة إضافة مجتمعية. لا تشارك الرابط مع أحد.</div>
 </main>
 <script nonce="${nonce}">
 (function(){
-var H=${jsStr(host)}, K=${jsStr(key)}, REG=${jsJson(reg)}, TMDB_ON=${tmdbOn ? 1 : 0};
+var H=${jsStr(host)}, K=${jsStr(key)}, REG=${jsJson(reg)}, SRV_TMDB=${srvTmdb ? 1 : 0};
 var GM=${jsJson(TM_GENRES.movie)}, GT=${jsJson(TM_GENRES.tv)}, PROV=${jsJson(TM_PROVIDERS)};
 var secure=location.protocol==="https:";
 var TABS=[["4k","4K"],["1080p","1080p"],["hdr","HDR"],["720p","720p"],["arabic","صوت عربي"],["cached","فوري سحابي"]];
@@ -1210,11 +1246,11 @@ function validML(){
   var out=[];ML.slice(0,8).forEach(function(m){var id=normMdb(m.i);if(id)out.push({i:id,t:m.t||"both",n:(m.n||"").trim().slice(0,40)})});return out;
 }
 function validTL(){
-  if(!TMDB_ON)return[];
+  if(!tmdbOn())return[];
   var out=[];TL.slice(0,8).forEach(function(m){var id=normTl(m.i);if(id)out.push({i:id,t:m.t||"both",n:(m.n||"").trim().slice(0,40)})});return out;
 }
 function validDC(){
-  if(!TMDB_ON)return[];
+  if(!tmdbOn())return[];
   return DC.slice(0,8).map(function(m){
     var o={t:m.t==="series"?"series":"movie",n:(m.n||"").trim().slice(0,40),s:m.s||"pop"};
     if(m.g)o.g=m.g;if(m.l)o.l=m.l;if(m.c)o.c=m.c;
@@ -1270,10 +1306,10 @@ function renderDC(){
 }
 
 /* ---------- جدول الكتالوجات ---------- */
-function baselineOn(r){return(mode==="tmdb"&&TMDB_ON)?!!r.m:(profile==="tv"?!!r.tv:true)}
+function baselineOn(r){return(mode==="tmdb"&&tmdbOn())?!!r.m:(profile==="tv"?!!r.tv:true)}
 function tkey(t,id){return(t==="series"?"s:":"m:")+id}
 function buildRows(){
-  var rows=REG.map(function(r){return{k:r.k,ty:r.ty,n:r.n,reg:r}});
+  var rows=REG.filter(function(r){return !r.g||tmdbOn()}).map(function(r){return{k:r.k,ty:r.ty,n:r.n,reg:r}});
   var types=function(t){return t==="both"?["movie","series"]:[t]};
   validML().forEach(function(s,i){types(s.t).forEach(function(t){rows.push({k:tkey(t,"cx_ml_"+i),ty:t,n:s.n||("MDBList "+(i+1))})})});
   validTL().forEach(function(s,i){types(s.t).forEach(function(t){rows.push({k:tkey(t,"cx_tl_"+i),ty:t,n:s.n||("قائمة TMDB "+(i+1))})})});
@@ -1315,7 +1351,8 @@ function b64u(s){return btoa(unescape(encodeURIComponent(s))).replace(/\\+/g,"-"
 function cfgObj(){
   var c={},nm=$("aname").value.trim();
   if(nm)c.n=nm.slice(0,30);
-  if(mode==="tmdb"&&TMDB_ON)c.m="tmdb";
+  if(mode==="tmdb"&&tmdbOn())c.m="tmdb";
+  var tk=tmdbKeyVal();if(tk.length>=20)c.tk=tk;
   var ml=validML();if(ml.length){c.mk=mdbKey();c.ml=ml}
   var tl=validTL();if(tl.length)c.tl=tl;
   var dc=validDC();if(dc.length)c.dc=dc;
@@ -1340,6 +1377,8 @@ function path(withCustom){
   if($("noav1").checked)c.push("noav1");
   if($("noemoji").checked)c.push("noemoji");
   if($("lite").checked)c.push("lite");
+  subTokens().forEach(function(t){c.push(t)});
+  if($("ctry").value)c.push("ct"+$("ctry").value);
   if(c.length)p+="cfg="+c.join(".")+"/";
   if(withCustom!==false){
     var o=cfgObj(),has=false;for(var x in o){has=true;break}
@@ -1384,13 +1423,14 @@ for(var i2=0;i2<mb.length;i2++)mb[i2].addEventListener("click",function(){
   for(var j=0;j<mb.length;j++)mb[j].setAttribute("aria-pressed",mb[j]===this?"true":"false");
   renderCats();refresh();
 });
-["prov","tok","maxq","maxgb","noremux","noav1","noemoji","lite","aname","mdbkey"].forEach(function(id){
-  $(id).addEventListener("input",function(){if(id==="mdbkey")renderCats();refresh()});
-  $(id).addEventListener("change",function(){if(id==="mdbkey")renderCats();refresh()});
+["prov","tok","maxq","maxgb","noremux","noav1","noemoji","lite","aname","mdbkey","tmdbkey","ctry"].forEach(function(id){
+  var h=function(){if(id==="mdbkey"||id==="tmdbkey"){syncTmdbUI();renderCats()}refresh()};
+  $(id).addEventListener("input",h);
+  $(id).addEventListener("change",h);
 });
 $("mlAdd").addEventListener("click",function(){ML.push({i:"",t:"both",n:""});renderML()});
-$("tlAdd").addEventListener("click",function(){if(!TMDB_ON){alert("يتطلب TMDB_API_KEY في الخادم");return}TL.push({i:"",t:"both",n:""});renderTL()});
-$("dcAdd").addEventListener("click",function(){if(!TMDB_ON){alert("يتطلب TMDB_API_KEY في الخادم");return}DC.push({n:"",t:"movie",s:"pop",g:"",l:"",c:"",y1:"",y2:"",p:"",q:""});renderDC();changed(false)});
+$("tlAdd").addEventListener("click",function(){if(!tmdbOn()){alert("أدخل مفتاح TMDB أولاً في قسم المفاتيح");return}TL.push({i:"",t:"both",n:""});renderTL()});
+$("dcAdd").addEventListener("click",function(){if(!tmdbOn()){alert("أدخل مفتاح TMDB أولاً في قسم المفاتيح");return}DC.push({n:"",t:"movie",s:"pop",g:"",l:"",c:"",y1:"",y2:"",p:"",q:""});renderDC();changed(false)});
 $("catAll").addEventListener("click",function(){touched=true;order.forEach(function(k){checked[k]=true});renderCats();refresh()});
 $("catNone").addEventListener("click",function(){touched=true;order.forEach(function(k){checked[k]=false});renderCats();refresh()});
 $("catReset").addEventListener("click",function(){touched=false;names={};order=[];checked={};renderCats();refresh()});
@@ -1398,7 +1438,77 @@ $("copy").addEventListener("click",copy);
 $("install").addEventListener("click",function(e){if(!secure){e.preventDefault();copy()}});
 tabsBox.addEventListener("click",function(e){if(!secure){e.preventDefault();window.prompt("انسخ الرابط:","https://"+link(e.target.getAttribute("data-tab")))}});
 
-renderML();renderTL();renderDC();renderCats();refresh();
+/* ---------- مفاتيح المستخدم / الترجمات / الاستيراد ---------- */
+function tmdbKeyVal(){return $("tmdbkey").value.replace(/[^A-Za-z0-9]/g,"").slice(0,64)}
+function tmdbOn(){return !!SRV_TMDB||tmdbKeyVal().length>=20}
+function setModeUI(){for(var j=0;j<mb.length;j++)mb[j].setAttribute("aria-pressed",mb[j].getAttribute("data-mode")===mode?"true":"false")}
+function setProfileUI(){for(var j=0;j<pb.length;j++)pb[j].setAttribute("aria-pressed",pb[j].getAttribute("data-profile")===profile?"true":"false")}
+function syncTmdbUI(){
+  var on=tmdbOn();$("modeTmdb").disabled=!on;
+  $("modeHint").textContent=on?"كتالوجات TMDB فقط + بحث بأي لغة":"أدخل مفتاح TMDB أولاً";
+  if(!on&&mode==="tmdb"){mode="mix";setModeUI()}
+}
+var SL=[["eng","الإنجليزية"],["fre","الفرنسية"],["spa","الإسبانية"],["tur","التركية"],["ger","الألمانية"],["por","البرتغالية"],["per","الفارسية"]],SUBSEL={};
+function renderSubs(){
+  var b=$("subs");b.textContent="";
+  var a=el("label","chk"),ai=document.createElement("input");ai.type="checkbox";ai.checked=true;ai.disabled=true;
+  a.appendChild(ai);a.appendChild(document.createTextNode(" العربية (دائماً أولاً)"));b.appendChild(a);
+  SL.forEach(function(x){
+    var l=el("label","chk"),c=document.createElement("input");c.type="checkbox";c.checked=!!SUBSEL[x[0]];
+    c.addEventListener("change",function(){SUBSEL[x[0]]=c.checked;refresh()});
+    l.appendChild(c);l.appendChild(document.createTextNode(" "+x[1]));b.appendChild(l);
+  });
+}
+function subTokens(){var t=[];SL.forEach(function(x){if(SUBSEL[x[0]])t.push("sl"+x[0])});return t}
+function b64d(s){s=s.replace(/-/g,"+").replace(/_/g,"/");while(s.length%4)s+="=";return decodeURIComponent(escape(atob(s)))}
+function importUrl(u){
+  var p=String(u||"").trim(),i=p.indexOf("://");
+  if(i>=0){p=p.slice(i+3);var sl=p.indexOf("/");p=sl>=0?p.slice(sl):"/"}
+  p=p.split("?")[0].split("#")[0];
+  var segs=p.split("/").filter(Boolean).map(function(x){try{return decodeURIComponent(x)}catch(e){return x}});
+  if(K&&segs[0]===K)segs.shift();
+  var toks=[],cobj=null,any=false,m,prov="",tok="";
+  segs.forEach(function(sg){
+    if((m=sg.match(/^(torbox|realdebrid|alldebrid|premiumize|debridlink)=([A-Za-z0-9_-]+)$/i))){prov=m[1].toLowerCase();tok=m[2];any=true}
+    else if((m=sg.match(/^cfg=([a-z0-9.]+)$/i))){toks=m[1].toLowerCase().split(".");any=true}
+    else if((m=sg.match(/^c=([A-Za-z0-9_-]+)$/))){try{cobj=JSON.parse(b64d(m[1]));any=true}catch(e){}}
+  });
+  if(!any)return false;
+  var set={};toks.forEach(function(t){set[t]=1});
+  $("prov").value=prov;$("tok").value=tok;
+  profile=set.tv?"tv":(set.m720&&set.n15?"saver":"mobile");
+  $("noremux").checked=!!set.noremux;$("noav1").checked=!!set.noav1;$("noemoji").checked=!!set.noemoji;$("lite").checked=!!set.lite;
+  $("maxq").value="";if(profile!=="saver"){["m4k","m1080","m720"].forEach(function(q){if(set[q])$("maxq").value=q})}
+  $("maxgb").value="";toks.forEach(function(t){if(/^gb[0-9]+$/.test(t))$("maxgb").value=t});
+  $("ctry").value="";SUBSEL={};
+  toks.forEach(function(t){
+    if(/^ct[a-z][a-z]$/.test(t))$("ctry").value=t.slice(2);
+    if(/^sl[a-z][a-z][a-z]$/.test(t))SUBSEL[t.slice(2)]=true;
+  });
+  ML=[];TL=[];DC=[];touched=false;names={};order=[];checked={};mode="mix";
+  $("aname").value="";$("mdbkey").value="";$("tmdbkey").value="";
+  if(cobj&&typeof cobj==="object"){
+    $("aname").value=cobj.n||"";$("mdbkey").value=cobj.mk||"";$("tmdbkey").value=cobj.tk||"";
+    mode=cobj.m==="tmdb"?"tmdb":"mix";
+    ML=(cobj.ml||[]).map(function(x){return{i:x.i||"",t:x.t||"both",n:x.n||""}});
+    TL=(cobj.tl||[]).map(function(x){return{i:x.i||"",t:x.t||"both",n:x.n||""}});
+    DC=(cobj.dc||[]).map(function(x){return{n:x.n||"",t:x.t||"movie",s:x.s||"pop",g:x.g||"",l:x.l||"",c:x.c||"",y1:x.y1?String(x.y1):"",y2:x.y2?String(x.y2):"",p:x.p?String(x.p):"",q:x.q?String(x.q):""}});
+    if(Array.isArray(cobj.v)){
+      touched=true;var vs={};cobj.v.forEach(function(k){vs[k]=1});
+      order=cobj.v.slice();REG.forEach(function(r){checked[r.k]=!!vs[r.k]});
+      if(cobj.r&&typeof cobj.r==="object")names=cobj.r;
+    }
+  }
+  setProfileUI();syncTmdbUI();setModeUI();renderSubs();renderML();renderTL();renderDC();renderCats();refresh();
+  return true;
+}
+$("impbtn").addEventListener("click",function(){
+  var ok=importUrl($("impurl").value);
+  $("impmsg").textContent=ok?"تم الاستيراد ✓ عدّل ما تشاء ثم ثبّت من جديد.":"لم أجد إعدادات في هذا الرابط.";
+});
+
+renderSubs();syncTmdbUI();renderML();renderTL();renderDC();renderCats();refresh();
+importUrl(location.pathname);
 try{$("firstFocus").focus()}catch(e){}
 
 // حماية خفيفة ضد الفحص العابر (رادع فقط؛ الأمان الحقيقي في مفتاح الوصول من جهة الخادم)
@@ -1576,7 +1686,7 @@ async function buildArabicMeta(type, rawId) {
 
 const metaBuilds = new Map();
 function getMetaPayload(type, id) {
-  const key = `meta_v21_${type}_${id}`;
+  const key = `meta_v21_${metaTag()}_${type}_${id}`;
   const hit = getFromCache(key, true, CACHE_TTL_META);
   if (hit) {
     return Promise.resolve({ payload: { meta: hit.meta }, partial: false });
@@ -1585,7 +1695,7 @@ function getMetaPayload(type, id) {
 
   const job = (async () => {
     if (KV_ON) {
-      const kv = await kvGetJson(`meta_${type}_${id}`);
+      const kv = await kvGetJson(`meta_${metaTag()}_${type}_${id}`);
       if (kv?.meta) {
         saveToCache(key, kv, CACHE_TTL_META);
         return { payload: { meta: kv.meta }, partial: false };
@@ -1597,7 +1707,7 @@ function getMetaPayload(type, id) {
     const payload = { meta: built.meta };
     saveToCache(key, payload, CACHE_TTL_META);
     if (KV_ON) {
-      withDeadline(kvSetJson(`meta_${type}_${id}`, payload, 60 * 60 * 12), 400).catch(() => {});
+      withDeadline(kvSetJson(`meta_${metaTag()}_${type}_${id}`, payload, 60 * 60 * 12), 400).catch(() => {});
     }
     return { payload, partial: false };
   })().finally(() => metaBuilds.delete(key));
@@ -1611,7 +1721,7 @@ function warmMeta(type, ids) {
   for (const id of ids) {
     if (n >= 4) break;
     if (!id || typeof id !== "string") continue;
-    const key = `meta_v21_${type}_${id}`;
+    const key = `meta_v21_${metaTag()}_${type}_${id}`;
     if (getFromCache(key, true, CACHE_TTL_META) || metaBuilds.has(key)) continue;
     n++;
     getMetaPayload(type, id).catch(() => {});
@@ -1760,7 +1870,7 @@ function parseCustom(seg) {
     const j = JSON.parse(raw);
     if (!j || typeof j !== "object" || Array.isArray(j)) return null;
 
-    const c = { n: clip(j.n, 30), m: j.m === "tmdb" ? "tmdb" : "mix", v: null, r: {}, mk: "", ml: [], tl: [], dc: [] };
+    const c = { n: clip(j.n, 30), m: j.m === "tmdb" ? "tmdb" : "mix", v: null, r: {}, mk: "", tk: "", ml: [], tl: [], dc: [] };
 
     if (Array.isArray(j.v)) c.v = j.v.slice(0, 150).map(String).filter(x => KEY_RE.test(x));
     if (j.r && typeof j.r === "object") {
@@ -1771,6 +1881,8 @@ function parseCustom(seg) {
     }
     const mk = String(j.mk || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 64);
     if (mk.length >= 10) c.mk = mk;
+    const tk = String(j.tk || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 64);
+    if (tk.length >= 20) c.tk = tk;
 
     for (const s of (Array.isArray(j.ml) ? j.ml : []).slice(0, 8)) {
       const id = normMdbId(s?.i);
@@ -1948,7 +2060,7 @@ async function mdbListMetas(key, spec, type, skip, o) {
       };
     }
     // عنصر بلا IMDb: نكمله من TMDB إن وُجد مفتاحه، وإلا نتجاهله
-    if (TMDB_API_KEY && Number.isInteger(Number(x.id)) && Number(x.id) > 0) {
+    if (hasTmdb() && Number.isInteger(Number(x.id)) && Number(x.id) > 0) {
       const tvType = type === "series";
       const r = await safeFetchJson(tmdbUrl(`/${tvType ? "tv" : "movie"}/${Number(x.id)}`, "language=ar-SA"), {}, 3500);
       return r ? tmdbToMeta(r, type, "") : null;
@@ -1965,7 +2077,7 @@ function finishMetas(metas, o) {
 // يعيد null إذا لم يكن الكتالوج من النوع الخاص (فيكمل المسار العادي)
 async function specialCatalog(type, id, extra, o, countryCode) {
   const cc = o.cc;
-  const tmdbOn = Boolean(TMDB_API_KEY);
+  const tmdbOn = hasTmdb();
   const skip = Math.max(0, parseInt(extra.skip, 10) || 0);
 
   const mc = id.match(/^cx_(ml|tl|dc)_(\d{1,2})$/);
@@ -2066,7 +2178,7 @@ function applySecurityHeaders(req, res) {
 }
 
 const SEG_DEBRID = /^(torbox|realdebrid|alldebrid|premiumize|debridlink)=([A-Za-z0-9_-]{8,128})$/i;
-const SEG_CFG = /^cfg=([a-z0-9.]{1,80})$/i;
+const SEG_CFG = /^cfg=([a-z0-9.]{1,160})$/i;
 const SEG_TAB = /^(8k|4k|2k|1080p|720p|480p|hdr|arabic|cached|all)$/i;
 const TYPES = new Set(["movie", "series", "anime"]);
 const ID_RE = /^[A-Za-z0-9:_.-]{1,64}$/;
@@ -2172,7 +2284,7 @@ async function catalogPayload(type, catalogId, extra, o, countryCode) {
 
   // 2. كتالوجات TMDB (تركي/كوري/مصري/خليجي/الأحدث/الأعلى تقييماً) مع ترقيم صفحات
   const def = TMDB_CATALOGS[catalogId];
-  if (def && TMDB_API_KEY) {
+  if (def && hasTmdb()) {
     const qs = [def.params, def.region ? `region=${encodeURIComponent(countryCode)}` : ""].filter(Boolean).join("&");
     const metas = await tmdbListMetas(def.path, qs, def.type, def.fallback, extra);
     return finish(metas);
@@ -2189,7 +2301,7 @@ async function catalogPayload(type, catalogId, extra, o, countryCode) {
   }
 
   // 4. بحث عربي مباشر عبر TMDB (النتائج بالعربية حتى لو كتبت الاسم بالعربية)
-  if (search && hasArabic(search) && TMDB_API_KEY) {
+  if (search && hasArabic(search) && hasTmdb()) {
     const isSeries = type === "series" || type === "anime";
     const page = Math.floor(skip / 20) + 1;
     const data = await safeFetchJson(
@@ -2276,7 +2388,7 @@ function buildManifest(o, tab, countryName) {
   }
 
   const cc = o.cc;
-  const tmdbOn = Boolean(TMDB_API_KEY);
+  const tmdbOn = hasTmdb();
   const tmode = tmdbOn && cc?.m === "tmdb";
   const reg = catalogRegistry(countryName).filter(c => !c.tmdb || tmdbOn);
 
@@ -2330,7 +2442,11 @@ function buildManifest(o, tab, countryName) {
 
 let warnedKey = false;
 
-export default async function handler(req, res) {
+export default function handler(req, res) {
+  return reqCtx.run({ tmdbKey: "" }, () => handlerInner(req, res));
+}
+
+async function handlerInner(req, res) {
   try {
     applySecurityHeaders(req, res);
     res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
@@ -2400,6 +2516,7 @@ export default async function handler(req, res) {
     }
     const o = buildOptions(flags, cfgTokens);
     o.cc = custom;
+    { const st = reqCtx.getStore(); if (st && custom?.tk) st.tmdbKey = custom.tk; }
     const tail = rest.slice(i);
     const rawTail = rawRest.slice(i);
     const route = (tail[0] || "").replace(/\.json$/i, "").toLowerCase();
@@ -2409,7 +2526,7 @@ export default async function handler(req, res) {
     // ---- Manifest ----
     if (route === "manifest") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
-      const { countryName } = getUserRegionInfo(req);
+      const { countryName } = getUserRegionInfo(req, o.country);
       return res.status(200).json(buildManifest(o, tab, countryName));
     }
 
@@ -2443,9 +2560,9 @@ export default async function handler(req, res) {
 
       const extraRaw = (rawTail[3] || "").replace(/\.json$/i, "");
       const extra = parseExtra(extraRaw || queryPart);
-      const { countryCode } = getUserRegionInfo(req);
+      const { countryCode } = getUserRegionInfo(req, o.country);
       const daySeed = Math.floor(Date.now() / (12 * 60 * 60 * 1000));
-      const cacheKey = `cat_v21_${o.tv ? "tv" : "d"}_${o.cc ? o.cc.hk : "x"}_${o.catMax}_${type}_${id}_${countryCode}_${daySeed}_${upstreamExtraSuffix(extra)}`;
+      const cacheKey = `cat_v22_${o.tv ? "tv" : "d"}_${hasTmdb() ? 1 : 0}_${o.cc ? o.cc.hk : "x"}_${o.catMax}_${type}_${id}_${countryCode}_${daySeed}_${upstreamExtraSuffix(extra)}`;
 
       const fresh = getFromCache(cacheKey, false);
       if (fresh) return res.status(200).json(fresh);
@@ -2484,30 +2601,35 @@ export default async function handler(req, res) {
 
       const extraSub = (rawTail[3] || "").replace(/\.json$/i, "");
       const safeExtra = /^[A-Za-z0-9=&._%-]{1,200}$/.test(extraSub) ? extraSub : "";
-      const cacheKey = `subs_v21_${type}_${subId}_${safeExtra}_${o.subsMax}`;
+      const wanted = ["ara", ...o.subLangs.filter(c => c !== "ara")];
+      const cacheKey = `subs_v22_${type}_${subId}_${safeExtra}_${o.subsMax}_${wanted.join("")}`;
       const cachedSubs = getFromCache(cacheKey, true, CACHE_TTL_META);
       if (cachedSubs) return res.status(200).json({ subtitles: cachedSubs });
 
       const targetSubUrl = `${UPSTREAM_ADDONS.opensubtitlesV3}/subtitles/${type}/${subId}${safeExtra ? "/" + safeExtra : ""}.json`;
       const subRes = await withDeadline(safeFetchJson(targetSubUrl, {}, 3200), 3400);
-      const isArabicLang = l => /^(ara|ar|arb|arabic|ar-[a-z]{2})$/i.test(String(l || "").trim());
       const seenUrls = new Set();
-      const subtitles = [];
+      const buckets = new Map(wanted.map(c => [c, []]));
 
       if (Array.isArray(subRes?.subtitles)) {
         for (const s of subRes.subtitles) {
-          if (!s?.url || !isArabicLang(s.lang) || seenUrls.has(s.url)) continue;
+          if (!s?.url || seenUrls.has(s.url)) continue;
+          const lang = String(s.lang || "").trim();
+          const code = wanted.find(c => SUB_LANGS[c].test(lang));
+          if (!code) continue;
           seenUrls.add(s.url);
-          subtitles.push({
+          const item = {
             id: String(s.id || s.url),
             url: s.url,
-            lang: "ara",
-            SubEncoding: s.SubEncoding || "CP1256",
-            subtitleFileName: s.subtitleFileName || s.movieReleaseName || "ترجمة عربية متوافقة"
-          });
+            lang: code === "ara" ? "ara" : (s.lang || code),
+            subtitleFileName: s.subtitleFileName || s.movieReleaseName || (code === "ara" ? "ترجمة عربية متوافقة" : code)
+          };
+          if (code === "ara") item.SubEncoding = s.SubEncoding || "CP1256";
+          else if (s.SubEncoding) item.SubEncoding = s.SubEncoding;
+          buckets.get(code).push(item);
         }
       }
-
+      const subtitles = wanted.flatMap(c => buckets.get(c));
       const finalSubs = subtitles.slice(0, o.subsMax);
       if (finalSubs.length) saveToCache(cacheKey, finalSubs, CACHE_TTL_META);
       return res.status(200).json({ subtitles: finalSubs });
@@ -2584,6 +2706,7 @@ if (isMain) {
     if (!KEY_ON) console.log(`صفحة التثبيت:  http://localhost:${PORT}/   (⚠ الوضع مفتوح: لا يوجد ACCESS_KEY)`);
     else if (KEY_VALID) console.log(`صفحة التثبيت:  http://localhost:${PORT}/<ACCESS_KEY>/`);
     else console.log(`⚠ ACCESS_KEY غير صالح (12-64 حرفاً A-Z a-z 0-9 _ -). اقتراح: ${randomBytes(18).toString("base64url")}`);
-    if (!TMDB_API_KEY) console.log("ℹ TMDB_API_KEY غير مضبوط: التعريب الرسمي والكتالوجات التركية/الكورية/المصرية معطّلة.");
+    console.log(KEY_ON ? "الوضع: خاص (ACCESS_KEY مفعّل)" : "الوضع: عام متعدد المستخدمين — كل مستخدم يضع مفاتيحه من صفحة التثبيت");
+    if (!TMDB_API_KEY) console.log("ℹ TMDB_API_KEY غير مضبوط: المستخدم يدخل مفتاحه من الصفحة (بدونه التعريب تلقائي فقط).");
   });
 }
