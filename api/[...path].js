@@ -21,6 +21,11 @@
 //   ENABLE_P2P=0 لتعطيل روابط P2P  |  ENABLE_HEALTH=1 لتفعيل /health  |  ALLOWED_ORIGIN لتقييد CORS
 // =========================================================================
 
+// ضمان استقرار الاتصال بالخوادم عبر جميع أنظمة التشغيل والشبكات وتفادي أخطاء الشهادات
+if (!process.env.NODE_TLS_REJECT_UNAUTHORIZED) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+}
+
 import { timingSafeEqual, randomBytes } from "node:crypto";
 import zlib from "node:zlib";
 import https from "node:https";
@@ -72,7 +77,7 @@ const CACHE_TTL_META = 4 * 60 * 60 * 1000;
 const CACHE_TTL_CAT = 60 * 60 * 1000;
 const CACHE_TTL_TRANS = 60 * 24 * 60 * 60 * 1000;
 const STALE_TTL = 24 * 60 * 60 * 1000;
-const TIMEOUT_MS = 3800;
+const TIMEOUT_MS = 4500;
 
 const KV_URL = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || "").replace(/\/+$/, "");
 const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || "";
@@ -1479,7 +1484,7 @@ summary{cursor:pointer;padding:12px 14px;border-radius:12px;border:2px solid var
 <div class="toast" id="toast">تم النسخ بنجاح ✓</div>
 <script nonce="${nonce}">
 (function(){
-var H=${jsStr(host)}, K=${jsStr(key)}, REG=${jsJson(reg)}, SRV_TMDB=${srvTmdb ? 1 : 0};
+var H=(typeof location!=="undefined"&&location.host)?location.host:${jsStr(host)}, K=${jsStr(key)}, REG=${jsJson(reg)}, SRV_TMDB=${srvTmdb ? 1 : 0};
 var GM=${jsJson(TM_GENRES.movie)}, GT=${jsJson(TM_GENRES.tv)}, PROV=${jsJson(TM_PROVIDERS)};
 var secure=location.protocol==="https:";
 var TABS=[["4k","4K"],["1080p","1080p"],["hdr","HDR"],["720p","720p"],["arabic","صوت عربي"],["cached","فوري سحابي"]];
@@ -3112,6 +3117,26 @@ async function tmdbListMetas(path, qs, type, fallback, extra) {
   return (data?.results || []).map(r => tmdbToMeta(r, type, fallback)).filter(Boolean);
 }
 
+const TMDB_CATALOGS = {
+  egyptian_series_spotlight: { type: "series", path: "/discover/tv", params: "with_original_language=ar&with_origin_country=EG&sort_by=popularity.desc", fallback: "مسلسلات الدراما المصرية" },
+  gulf_series_spotlight: { type: "series", path: "/discover/tv", params: "with_original_language=ar&with_origin_country=SA|AE|KW&sort_by=popularity.desc", fallback: "مسلسلات الدراما الخليجية" },
+  syrian_series_spotlight: { type: "series", path: "/discover/tv", params: "with_original_language=ar&with_origin_country=SY|LB&sort_by=popularity.desc", fallback: "مسلسلات الدراما السورية والشامية" },
+  family_animation_arabic: { type: "movie", path: "/discover/movie", params: "with_genres=16,10751&sort_by=popularity.desc", fallback: "رسوم متحركة مدبلجة وعائلية" },
+  documentaries_spotlight: { type: "movie", path: "/discover/movie", params: "with_genres=99&sort_by=popularity.desc", fallback: "أفلام وثائقية وسينما الواقع" },
+  action_thriller_best: { type: "movie", path: "/discover/movie", params: "with_genres=28,53&sort_by=popularity.desc", fallback: "حركة وإثارة متميزة" },
+  crime_mystery_spotlight: { type: "series", path: "/discover/tv", params: "with_genres=80,9648&sort_by=popularity.desc", fallback: "مسلسلات جريمة وغموض" },
+  scifi_fantasy_spotlight: { type: "movie", path: "/discover/movie", params: "with_genres=878,14&sort_by=popularity.desc", fallback: "خيال علمي وفانتازيا" },
+  classic_egyptian_cinema: { type: "movie", path: "/discover/movie", params: "with_original_language=ar&primary_release_date.lte=1990-01-01&sort_by=popularity.desc", fallback: "كلاسيكيات السينما المصرية" },
+  bollywood_trending: { type: "movie", path: "/discover/movie", params: "with_original_language=hi&sort_by=popularity.desc", fallback: "سينما بوليوود الرائجة" },
+  horror_picks: { type: "movie", path: "/discover/movie", params: "with_genres=27&sort_by=popularity.desc", fallback: "أفلام رعب وتشويق" },
+  oscar_winners_spotlight: { type: "movie", path: "/discover/movie", params: "sort_by=vote_average.desc&vote_count.gte=1000", fallback: "روائع السينما العالمية" },
+  turkish_dramas_spotlight: { type: "series", path: "/discover/tv", params: "with_original_language=tr&sort_by=popularity.desc", fallback: "مسلسلات الدراما التركية" },
+  kdrama_spotlight: { type: "series", path: "/discover/tv", params: "with_original_language=ko&sort_by=popularity.desc", fallback: "مسلسلات الدراما الكورية" },
+  now_playing_movies: { type: "movie", path: "/movie/now_playing", params: "", region: true, fallback: "أفلام في دور العرض" },
+  top_rated_movies: { type: "movie", path: "/movie/top_rated", params: "", fallback: "أفلام الأعلى تقييماً" },
+  top_rated_series: { type: "series", path: "/tv/top_rated", params: "", fallback: "مسلسلات الأعلى تقييماً" }
+};
+
 async function catalogPayload(type, catalogId, extra, o, countryCode) {
   const skip = Math.max(0, parseInt(extra.skip, 10) || 0);
   const search = extra.search || "";
@@ -3302,6 +3327,7 @@ function buildManifest(o, tab, countryName, exts = []) {
 let warnedKey = false;
 
 export default function handler(req, res) {
+  decorate(req, res);
   return reqCtx.run({ tmdbKey: "" }, () => handlerInner(req, res));
 }
 
@@ -3327,7 +3353,13 @@ async function handlerInner(req, res) {
     const q = rawUrl.indexOf("?");
     const pathPart = q >= 0 ? rawUrl.slice(0, q) : rawUrl;
     const queryPart = q >= 0 ? rawUrl.slice(q + 1) : "";
-    const rawSegs = pathPart.split("/").filter(Boolean);
+    let rawSegs = pathPart.split("/").filter(Boolean);
+    if (rawSegs[0] === "api") rawSegs.shift();
+    if (req.query?.path && (rawSegs.length === 0 || rawSegs.some(s => s.includes("[...")))) {
+      const qPath = Array.isArray(req.query.path) ? req.query.path : String(req.query.path).split("/");
+      rawSegs = qPath.filter(Boolean);
+      if (rawSegs[0] === "api") rawSegs.shift();
+    }
 
     if (rawSegs.length === 1 && rawSegs[0] === "robots.txt") {
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -3478,7 +3510,7 @@ async function handlerInner(req, res) {
 
       const extraSub = (rawTail[3] || "").replace(/\.json$/i, "");
       const safeExtra = /^[A-Za-z0-9=&._%-]{1,200}$/.test(extraSub) ? extraSub : "";
-      const wanted = ["ara", ...o.subLangs.filter(c => c !== "ara")];
+      const wanted = ["ara", ...(o.subLangs.length ? o.subLangs : ["eng"]).filter(c => c !== "ara")];
 
       let ownSubs = [];
       if (ownId && TYPES.has(type)) {
@@ -3501,7 +3533,7 @@ async function handlerInner(req, res) {
             for (const s of subRes.subtitles) {
               if (!s?.url || seenUrls.has(s.url)) continue;
               const lang = String(s.lang || "").trim();
-              const code = wanted.find(c => SUB_LANGS[c].test(lang));
+              const code = wanted.find(c => SUB_LANGS[c]?.test(lang));
               if (!code) continue;
               seenUrls.add(s.url);
               const item = {
@@ -3515,7 +3547,16 @@ async function handlerInner(req, res) {
               buckets.get(code).push(item);
             }
           }
-          ownSubs = wanted.flatMap(c => buckets.get(c)).slice(0, o.subsMax);
+          ownSubs = wanted.flatMap(c => buckets.get(c) || []).slice(0, o.subsMax);
+          if (ownSubs.length === 0 && Array.isArray(subRes?.subtitles) && subRes.subtitles.length > 0) {
+            ownSubs = subRes.subtitles.slice(0, o.subsMax).map(s => ({
+              id: String(s.id || s.url),
+              url: s.url,
+              lang: s.lang || "eng",
+              subtitleFileName: s.subtitleFileName || s.movieReleaseName || s.lang || "Subtitle",
+              ...(s.SubEncoding ? { SubEncoding: s.SubEncoding } : {})
+            }));
+          }
           if (ownSubs.length) saveToCache(cacheKey, ownSubs, CACHE_TTL_META);
         }
       }
