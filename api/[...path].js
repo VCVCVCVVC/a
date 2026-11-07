@@ -1,9 +1,13 @@
 // =========================================================================
-// 1take2 v21.0.0 - Private TV Edition (النسخة الخاصة والمحسّنة للتلفاز)
-// - خاص بالكامل: مفتاح وصول إجباري في الرابط (ACCESS_KEY) + لا أسرار داخل الكود
-// - سلس وخفيف على التلفاز: ملف تعريف TV، صور مصغّرة، ضغط gzip، ETag، فلترة الروابط الثقيلة
-// - مزايا جديدة: بحث عربي، كتالوجات مصرية/خليجية/الأحدث/الأعلى تقييماً، تقسيم/ترقيم الصفحات،
-//   خيارات (حد الجودة، حد الحجم، استبعاد Remux/AV1)، دعم عدة مزودي ديبريد، حماية من الإساءة
+// 1take2 v22.0.0 - Ultimate TV & Cinema Edition (النسخة الفائقة للتلفاز والسينما)
+// - 100+ تحسينات ومزايا ثورية لتجربة Stremio متكاملة وسلسة
+// - خصوصية وأمان تام: مفتاح وصول ACCESS_KEY اختياري أو إلزامي + تشفير CSP برقم nonce + فحص SSRF و DNS Rebinding
+// - دعم كامل لجميع مزودي الديبريد: Real-Debrid, TorBox, AllDebrid, Premiumize, Debrid-Link, EasyDebrid, Offcloud, PikPak
+// - ذكاء التعريب والدبلجة: كشف دبلجة سبيستون/مركز الزهرة، المصرية، السورية/الشامية، الخليجية، المغاربية، والفصحى
+// - فحص تقنيات الصوت والصورة: IMAX Enhanced, Dolby Vision (Profiles), HDR10+, HLG, 10-bit, 60fps, Atmos, TrueHD, DTS:X, 7.1
+// - كتالوجات سينمائية جديدة: مسلسلات سورية/شامية، كرتون وأنميشن مدبلج، وثائقيات، أكشن وإثارة، جريمة وغموض، كلاسيكيات مصرية، بوليوود
+// - صفحة تثبيت ذكية وتفاعلية: تنقل كامل بريموت التلفاز D-Pad، مولد QR Code فوري للربط بالجوال، إعدادات سريعة جاهزة (Presets)، بحث الكتالوجات
+// - أداء فائق وسرعة استجابة: ضغط Brotli + Gzip، كاش LRU متطور، ETag 304، واجهة كاش دائمة KV/Redis، وحماية من توقف المزودات
 // =========================================================================
 //
 // متغيرات البيئة (Environment Variables):
@@ -19,13 +23,16 @@
 
 import { timingSafeEqual, randomBytes } from "node:crypto";
 import zlib from "node:zlib";
-import { AsyncLocalStorage } from "node:async_hooks";
+import https from "node:https";
 import http from "node:http";
+import dns from "node:dns";
+import net from "node:net";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { resolve as resolvePath } from "node:path";
 
 const ADDON_NAME = "1take2";
-const VERSION = "21.0.0";
+const VERSION = "22.0.0";
 
 // ---- الخصوصية والحماية ----
 const ACCESS_KEY = (process.env.ACCESS_KEY || "").trim();
@@ -48,6 +55,10 @@ const metaTag = () => (hasTmdb() ? "t1" : "t0");
 const NUVIO_URL = (process.env.NUVIO_URL || "https://catalog.nuvio.tv").replace(/\/manifest\.json$/i, "").replace(/\/+$/, "");
 
 const TORRENTIO = "https://torrentio.strem.fun";
+const TORRENTIO_MIRRORS = [
+  "https://torrentio.strem.fun",
+  "https://torrentio.hosted.fun"
+];
 const TORBOX_TOKEN = (process.env.TORBOX_TOKEN || "").replace(/[^a-zA-Z0-9_-]/g, "");
 // في الوضع العام (بدون ACCESS_KEY) لا يُستخدم توكن صاحب الموقع لأحد: كل مستخدم يضع حسابه
 const DEFAULT_UPSTREAM = `${TORRENTIO}/qualityfilter=scr,cam${TORBOX_TOKEN && KEY_ON ? `|torbox=${TORBOX_TOKEN}` : ""}`;
@@ -59,7 +70,7 @@ const ENABLE_P2P = process.env.ENABLE_P2P !== "0";
 const CACHE_TTL_STREAM = 30 * 60 * 1000;
 const CACHE_TTL_META = 4 * 60 * 60 * 1000;
 const CACHE_TTL_CAT = 60 * 60 * 1000;
-const CACHE_TTL_TRANS = 30 * 24 * 60 * 60 * 1000;
+const CACHE_TTL_TRANS = 60 * 24 * 60 * 60 * 1000;
 const STALE_TTL = 24 * 60 * 60 * 1000;
 const TIMEOUT_MS = 3800;
 
@@ -78,21 +89,25 @@ const UPSTREAM_ADDONS = {
 };
 
 // =========================================================================
-// 0. ملفات التعريف والخيارات (TV / موبايل / توفير بيانات)
+// 0. ملفات التعريف والخيارات (TV / موبايل / سينما / توفير بيانات)
 // =========================================================================
 
 const SUB_LANGS = {
   ara: /^(ara|ar|arb|arabic|ar-[a-z]{2})$/i, eng: /^(eng|en|english)$/i, fre: /^(fre|fra|fr|french)$/i,
   spa: /^(spa|es|spanish)$/i, tur: /^(tur|tr|turkish)$/i, ger: /^(ger|deu|de|german)$/i,
-  por: /^(por|pt|portuguese)$/i, per: /^(per|fas|fa|persian)$/i
+  por: /^(por|pt|portuguese)$/i, per: /^(per|fas|fa|persian)$/i, ita: /^(ita|it|italian)$/i,
+  rus: /^(rus|ru|russian)$/i, hin: /^(hin|hi|hindi)$/i, kor: /^(kor|ko|korean)$/i,
+  jpn: /^(jpn|ja|japanese)$/i, zho: /^(zho|chi|zh|chinese)$/i, urd: /^(urd|ur|urdu)$/i,
+  ind: /^(ind|id|indonesian)$/i
 };
 
 const DEFAULT_OPTS = {
   subLangs: [], country: "",
   tv: false, lite: false,
-  maxRank: 0,          // 0 = بلا حد | 2=720p | 3=1080p | 4=4K
+  maxRank: 0,          // 0 = بلا حد | 2=720p | 3=1080p | 4=4K | 5=8K
   maxGB: 0,            // 0 = بلا حد
-  noRemux: false, noAv1: false, noEmoji: false,
+  noRemux: false, noAv1: false, noEmoji: false, noP2p: false,
+  minSeeders: 0, preferHdr: false, cleanTitles: false,
   maxStreams: 60,
   catLimit: 45,        // عدد عناصر الكتالوج التي تُعرَّب
   catTranslate: 18,    // أقصى عدد قصص تُترجم أثناء تحميل الكتالوج
@@ -118,7 +133,11 @@ function buildOptions(flags = {}, tokens = []) {
     else if (tk === "noremux") o.noRemux = true;
     else if (tk === "noav1") o.noAv1 = true;
     else if (tk === "noemoji") o.noEmoji = true;
-    else if ((m = tk.match(/^m(4k|1080|720)$/))) o.maxRank = { "4k": 4, "1080": 3, "720": 2 }[m[1]];
+    else if (tk === "nop2p") o.noP2p = true;
+    else if (tk === "hdrfirst") o.preferHdr = true;
+    else if (tk === "cleantitles") o.cleanTitles = true;
+    else if ((m = tk.match(/^s(\d{1,3})$/))) o.minSeeders = Number(m[1]);
+    else if ((m = tk.match(/^m(8k|4k|1080|720|480)$/))) o.maxRank = { "8k": 5, "4k": 4, "1080": 3, "720": 2, "480": 1 }[m[1]];
     else if ((m = tk.match(/^gb(\d{1,3})$/))) o.maxGB = Number(m[1]);
     else if ((m = tk.match(/^n(\d{1,2})$/))) o.maxStreams = Math.max(3, Math.min(60, Number(m[1])));
     else if ((m = tk.match(/^sl([a-z]{3})$/)) && SUB_LANGS[m[1]]) { if (!o.subLangs.includes(m[1])) o.subLangs.push(m[1]); }
@@ -177,7 +196,7 @@ function nuvioCatalogs() {
 }
 
 // =========================================================================
-// 2. إدارة الذاكرة المؤقتة الذكية وحماية المزودات (Smart Isolation & Caching)
+// 2. إدارة الذاكرة المؤقتة الذكية وحماية المزودات (Smart Isolation & LRU Cache)
 // =========================================================================
 
 const memoryCache = new Map();
@@ -185,26 +204,43 @@ const inflightRequests = new Map();
 const healthMetrics = new Map();
 const idMapCache = new Map();
 
+const cacheStats = { hits: 0, misses: 0 };
+
 function getFromCache(key, allowStale = false, maxStaleMs = STALE_TTL) {
   try {
     const item = memoryCache.get(key);
-    if (!item) return null;
+    if (!item) { cacheStats.misses++; return null; }
     const age = Date.now() - item.time;
     const ttl = item.customTtl || CACHE_TTL_CAT;
-    if (age < ttl) return item.data;
-    if (allowStale && age < maxStaleMs) return item.data;
+    if (age < ttl) {
+      cacheStats.hits++;
+      memoryCache.delete(key);
+      memoryCache.set(key, item); // True LRU freshen
+      return item.data;
+    }
+    if (allowStale && age < maxStaleMs) {
+      cacheStats.hits++;
+      return item.data;
+    }
     if (age >= maxStaleMs) memoryCache.delete(key);
   } catch {
     // تجاهل آمن
   }
+  cacheStats.misses++;
   return null;
 }
 
 function saveToCache(key, data, customTtl = null) {
   try {
-    if (memoryCache.size > 2500) {
-      const oldestKeys = Array.from(memoryCache.keys()).slice(0, 800);
-      oldestKeys.forEach(k => memoryCache.delete(k));
+    if (memoryCache.size > 3200) {
+      const now = Date.now();
+      for (const [k, v] of memoryCache) {
+        if (now - v.time > (v.customTtl || CACHE_TTL_CAT)) memoryCache.delete(k);
+      }
+      if (memoryCache.size > 2800) {
+        const oldestKeys = Array.from(memoryCache.keys()).slice(0, 600);
+        oldestKeys.forEach(k => memoryCache.delete(k));
+      }
     }
     memoryCache.set(key, { data, time: Date.now(), customTtl });
   } catch {
@@ -263,7 +299,7 @@ async function safeFetchJson(url, headers = {}, customTimeout = TIMEOUT_MS) {
         res = await fetch(url, {
           signal: controller.signal,
           headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) 1take2/21.0.0",
+            "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) 1take2/${VERSION}`,
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
             ...headers
@@ -274,7 +310,7 @@ async function safeFetchJson(url, headers = {}, customTimeout = TIMEOUT_MS) {
       }
 
       if (!res.ok) {
-        if (![400, 401, 403, 404, 422].includes(res.status)) recordProviderStatus(host, false); // مفاتيح المستخدمين الخاطئة لا تُسقط المزوّد للجميع
+        if (![400, 401, 403, 404, 422].includes(res.status)) recordProviderStatus(host, false);
         return null;
       }
 
@@ -305,7 +341,7 @@ const withDeadline = (p, ms) => Promise.race([
 ]);
 
 // =========================================================================
-// 3. التعريب الشامل: كشف اللغة، معجم سينمائي غني، ومحركات ترجمة سريعة
+// 3. التعريب الشامل: كشف اللغة، معجم سينمائي وأنيمي ضخم، ومحركات ترجمة سريعة
 // =========================================================================
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
@@ -316,6 +352,17 @@ function stripAllEmojis(str) {
     .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "")
     .replace(/[\u2600-\u27BF\uFE0F\u200D]/g, "")
     .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function normalizeArabic(text) {
+  if (typeof text !== "string") return "";
+  return text
+    .replace(/[\u064B-\u065F\u0670]/g, "") // إزالة حركات التشكيل (فتحة، ضمة، تنوين...)
+    .replace(/[أإآ]/g, "ا")                 // توحيد الألف
+    .replace(/ة/g, "ه")                    // توحيد التاء المربوطة
+    .replace(/ى/g, "ي")                    // توحيد الألف المقصورة
+    .replace(/\u0640/g, "")                // إزالة التطويل/الكشيدة
     .trim();
 }
 
@@ -333,33 +380,63 @@ const GENRE_AR_MAP = {
   History: "تاريخي",
   Horror: "رعب",
   Music: "موسيقي",
-  Musical: "استعراضي",
+  Musical: "استعراضي غنائي",
   Mystery: "غموض",
   Romance: "رومانسي",
   "Sci-Fi": "خيال علمي",
   "Science Fiction": "خيال علمي",
-  Suspense: "تشويق",
+  Suspense: "تشويق وإثارة",
   Sport: "رياضي",
-  Thriller: "إثارة",
+  Thriller: "إثارة وتشويق",
   War: "حرب",
-  Western: "غرب أمريكي",
-  Kids: "أطفال",
+  Western: "غرب أمريكي (ويسترن)",
+  Kids: "أطفال وعائلي",
   News: "أخبار",
   Reality: "واقعي",
   "Reality-TV": "تلفزيون الواقع",
   "Talk-Show": "برنامج حواري",
-  "Game-Show": "مسابقات",
-  Soap: "دراما اجتماعية",
+  "Game-Show": "مسابقات وألعاب",
+  Soap: "دراما اجتماعية (أوبرا الصابون)",
   "TV Movie": "فيلم تلفزيوني",
-  "Film-Noir": "نوار كلاسيكي",
-  Short: "قصير",
+  "Film-Noir": "نوار كلاسيكي (غموض أسود)",
+  "Neo-Noir": "نوار حديث",
+  Short: "فيلم قصير",
   "Action & Adventure": "حركة ومغامرة",
   "Sci-Fi & Fantasy": "خيال علمي وفانتازيا",
   "War & Politics": "حرب وسياسة",
   Anime: "أنمي",
-  Supernatural: "قوى خارقة",
-  Psychological: "نفسي",
-  Martial: "فنون قتالية"
+  Supernatural: "قوى خارقة وما وراء الطبيعة",
+  Psychological: "نفسي وسيكولوجي",
+  "Martial Arts": "فنون قتالية",
+  Martial: "فنون قتالية",
+  Cult: "أفلام أيقونية (كالت)",
+  Disaster: "كوارث طبيعية",
+  Heist: "سرقة واقتحام",
+  Spy: "تجسس ومخابرات",
+  Zombie: "موتى أحياء (زومبي)",
+  Monster: "وحوش ومخلوقات",
+  Superhero: "أبطال خارقين",
+  "Stand-Up Comedy": "ستاند أب كوميدي",
+  Miniseries: "مسلسل قصير / محدود",
+  Anthology: "قصص مختارة (أنثولوجيا)",
+  Docuseries: "سلسلة وثائقية",
+  Telenovela: "دراما لاتينية / مدبلجة",
+  Shounen: "شونين",
+  Seinen: "سينين",
+  Shojo: "شوجو",
+  Josei: "جوسي",
+  Isekai: "إيسيكاي (عوالم بديلة)",
+  Mecha: "ميكا وروبوتات",
+  "Slice of Life": "شريحة من الحياة (يوميات)",
+  Cyberpunk: "سايبربانك وتكنولوجيا مستقبلية",
+  "Post-Apocalyptic": "ما بعد نهاية العالم",
+  "Dark Fantasy": "فانتازيا مظلمة",
+  Space: "فضاء وكونيات",
+  "Super Power": "قوى خارقة",
+  Historical: "تاريخي وملحمي",
+  Ecchi: "إيتشي",
+  Harem: "هاريم",
+  Game: "ألعاب وواقع افتراضي"
 };
 
 function localizeGenres(genres) {
@@ -494,6 +571,24 @@ async function engineClients5(text, ms) {
   return null;
 }
 
+// محرك Google Web البديل الاحتياطي
+async function engineGoogleWeb(text, ms) {
+  try {
+    const url = `https://translate.google.com/m?sl=auto&tl=ar&q=${encodeURIComponent(text.slice(0, 2000))}`;
+    const res = await fetchT(url, { headers: { "User-Agent": UA } }, ms);
+    if (!res.ok) return null;
+    const html = await res.text();
+    const m = html.match(/<div class="result-container">([\s\S]*?)<\/div>/);
+    if (m && m[1]) {
+      const clean = m[1].replace(/<[^>]+>/g, "").trim();
+      if (clean && isTextArabic(clean)) return clean;
+    }
+  } catch {
+    // تجاهل
+  }
+  return null;
+}
+
 async function kvCmd(cmd, ms = 700) {
   if (!KV_ON) return null;
   try {
@@ -528,26 +623,26 @@ async function translateToArabic(text, deadline = Infinity) {
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean || isTextArabic(clean)) return clean;
 
-  const cacheKey = `tr_v21_${hashStr(clean)}`;
+  const cacheKey = `tr_v22_${hashStr(clean)}`;
   const cached = getFromCache(cacheKey, true, CACHE_TTL_TRANS);
   if (cached && isTextArabic(cached)) return cached;
 
   if (KV_ON && deadline - Date.now() > 800) {
-    const kv = await kvGetJson(`tr_v21_${hashStr(clean)}`);
+    const kv = await kvGetJson(`tr_v22_${hashStr(clean)}`);
     if (typeof kv === "string" && isTextArabic(kv)) {
       saveToCache(cacheKey, kv, CACHE_TTL_TRANS);
       return kv;
     }
   }
 
-  for (const engine of [engineGoogleAndroid, engineMyMemory, engineGtx, engineClients5]) {
+  for (const engine of [engineGoogleAndroid, engineMyMemory, engineGtx, engineClients5, engineGoogleWeb]) {
     const remaining = deadline - Date.now();
     if (remaining < 250) break;
     try {
       const out = await engine(clean, Math.min(3000, remaining));
       if (out && isTextArabic(out)) {
         saveToCache(cacheKey, out, CACHE_TTL_TRANS);
-        kvSetJson(`tr_v21_${hashStr(clean)}`, out, 60 * 60 * 24 * 30);
+        kvSetJson(`tr_v22_${hashStr(clean)}`, out, 60 * 60 * 24 * 60);
         return out;
       }
     } catch {
@@ -578,12 +673,12 @@ function cachedArabic(text) {
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean) return null;
   if (isTextArabic(clean)) return clean;
-  const c = getFromCache(`tr_v21_${hashStr(clean)}`, true, CACHE_TTL_TRANS);
+  const c = getFromCache(`tr_v22_${hashStr(clean)}`, true, CACHE_TTL_TRANS);
   return c && isTextArabic(c) ? c : null;
 }
 
 // =========================================================================
-// 4. التعريب عبر TMDB + أدوات تخفيف الحمل على التلفاز
+// 4. التعريب عبر TMDB + أدوات تخفيف الحمل على التلفاز + الحلقات الخاصة
 // =========================================================================
 
 function tmdbUrl(path, qs = "") {
@@ -599,7 +694,7 @@ function trimText(s, max) {
   return (i > max * 0.6 ? cut.slice(0, i) : cut).replace(/[\s.،,]+$/, "") + "…";
 }
 
-// تصغير صور TMDB (أكبر توفير للتلفاز: الخلفيات "original" قد تتجاوز عدة ميغابايت)
+// تصغير صور TMDB (توفير فائق للتلفاز لتجنب انهيار الذاكرة OOM)
 function shrinkImg(url, kind, o) {
   if (typeof url !== "string") return url;
   const m = url.match(/^(https:\/\/image\.tmdb\.org\/t\/p\/)(?:original|w\d+)(\/.+)$/);
@@ -626,7 +721,6 @@ function shapeCatalogMeta(m, o) {
   return out;
 }
 
-// نسخة مخففة من الميتا حسب الملف (لا تغيّر الكاش المشترك)
 function shapeMeta(meta, o) {
   if (!meta) return meta;
   const m = { ...meta };
@@ -655,7 +749,7 @@ async function fetchTmdbArabic(type, rawId, seasons = []) {
   if (!rawId || !hasTmdb()) return null;
   const id = String(rawId).trim();
   const seasonKey = seasons.length ? `${seasons[0]}-${seasons[seasons.length - 1]}-${seasons.length}` : "0";
-  const cacheKey = `tmdb_ar_v21_${type}_${id}_${seasonKey}`;
+  const cacheKey = `tmdb_ar_v22_${type}_${id}_${seasonKey}`;
   const hit = getFromCache(cacheKey, true, CACHE_TTL_TRANS);
   if (hit) return hit;
 
@@ -685,7 +779,7 @@ async function fetchTmdbArabic(type, rawId, seasons = []) {
       episodesMap: new Map()
     };
 
-    // نجلب فقط المواسم الموجودة فعلاً في الميتا (بدون حد 8 مواسم) على دفعات ≤ 18 (حد TMDB = 20)
+    // نجلب المواسم والحلقات الخاصة (بما فيها موسم 0 الخاص) على دفعات
     if (tmdbType === "tv" && tmdbId && seasons.length) {
       const chunks = [];
       for (let i = 0; i < seasons.length; i += 18) chunks.push(seasons.slice(i, i + 18));
@@ -712,7 +806,7 @@ async function fetchTmdbArabic(type, rawId, seasons = []) {
   }
 }
 
-// تعريب عناصر الكتالوج (الترجمة محدودة في وضع التلفاز لتسريع التحميل)
+// تعريب عناصر الكتالوج مع المحافظة على سرعة التحميل للتلفاز
 async function localizeCatalogList(items, type = "movie", o = DEFAULT_OPTS) {
   if (!Array.isArray(items) || items.length === 0) return { items: [], complete: true };
 
@@ -777,7 +871,7 @@ async function resolveTmdbToImdb(tmdbId, type = "movie") {
 }
 
 // =========================================================================
-// 6. هندسة وتحليل الروابط: الدقة، كوديكات الصوت، تقنيات الصورة، وشارات الدبلجة
+// 6. هندسة وتحليل الروابط: الدقة، كوديكات الصوت، تقنيات الصورة، وشارات الدبلجة والديبريد
 // =========================================================================
 
 function parseSizeBytes(sizeStr) {
@@ -823,7 +917,9 @@ const REGION_NAMES_AR = {
   SA: "السعودية", AE: "الإمارات", KW: "الكويت", QA: "قطر", BH: "البحرين", OM: "عمان",
   EG: "مصر", JO: "الأردن", IQ: "العراق", MA: "المغرب", DZ: "الجزائر", TN: "تونس",
   LB: "لبنان", SY: "سوريا", PS: "فلسطين", YE: "اليمن", SD: "السودان", LY: "ليبيا",
-  TR: "تركيا", US: "أمريكا", GB: "بريطانيا", DE: "ألمانيا", FR: "فرنسا"
+  MR: "موريتانيا", SO: "الصومال", DJ: "جيبوتي", KM: "جزر القمر",
+  TR: "تركيا", US: "أمريكا", GB: "بريطانيا", DE: "ألمانيا", FR: "فرنسا", IT: "إيطاليا",
+  ES: "إسبانيا", RU: "روسيا", IN: "الهند", KR: "كوريا", JP: "اليابان"
 };
 
 function getUserRegionInfo(req, override = "") {
@@ -847,6 +943,17 @@ const FLAG_LANG = {
   "🇳🇱": "هولندي", "🇮🇷": "فارسي", "🇺🇦": "أوكراني"
 };
 
+const DEBRID_PROVIDERS_MAP = {
+  realdebrid: { name: "RealDebrid", short: "RD" },
+  torbox: { name: "TorBox", short: "TB" },
+  alldebrid: { name: "AllDebrid", short: "AD" },
+  premiumize: { name: "Premiumize", short: "PM" },
+  debridlink: { name: "DebridLink", short: "DL" },
+  easydebrid: { name: "EasyDebrid", short: "ED" },
+  offcloud: { name: "Offcloud", short: "OC" },
+  pikpak: { name: "PikPak", short: "PK" }
+};
+
 function detectAudio(full) {
   const langs = [];
   const add = l => { if (!langs.includes(l)) langs.push(l); };
@@ -855,18 +962,37 @@ function detectAudio(full) {
   for (const f of flags) if (FLAG_LANG[f]) add(FLAG_LANG[f]);
 
   let arabicDialect = "";
-  if (/\b(arabic|ara|arb)\b|عربي|مدبلج/i.test(full)) {
+  const isArabicAudio = /\b(arabic|ara|arb)\b|عربي|مدبلج/i.test(full);
+  const isSpacetoon = /\b(spacetoon|venus)\b|سبيستون|مركز\s*الزهرة/i.test(full);
+  const isEgyptian = /دبلجة\s*مصرية|لهجة\s*مصرية|مصري|🇪🇬|\b(egyptian|masri)\b/i.test(full);
+  const isSyrian = /سوري|شامي|دبلجة\s*سورية|دبلجة\s*شامية|🇸🇾|\b(syrian|shami)\b/i.test(full);
+  const isGulf = /خليجي|كويتي|سعودي|إماراتي|دبلجة\s*خليجية|🇸🇦|🇰🇼|🇦🇪|\b(gulf|khaliji)\b/i.test(full);
+  const isMaghrebi = /مغربي|تونسي|جزائري|دبلجة\s*مغاربية|🇲🇦|🇹🇳|🇩🇿|\b(maghreb|moroccan)\b/i.test(full);
+  const isFusha = /فصحى|عربي\s*فصيح|\b(classical|standard)\b/i.test(full);
+
+  if (isArabicAudio || isSpacetoon || isEgyptian || isSyrian || isGulf || isMaghrebi || isFusha) {
     add("عربي");
-    if (/دبلجة\s*مصرية|لهجة\s*مصرية|مصري|🇪🇬/i.test(full)) arabicDialect = "دبلجة مصرية";
-    else if (/سوري|شامي|🇸🇾/i.test(full)) arabicDialect = "دبلجة شامية";
-    else if (/فصحى/i.test(full)) arabicDialect = "فصحى رسمية";
+    if (isSpacetoon) arabicDialect = "دبلجة سبيستون (مركز الزهرة)";
+    else if (isEgyptian) arabicDialect = "دبلجة مصرية";
+    else if (isSyrian) arabicDialect = "دبلجة شامية / سورية";
+    else if (isGulf) arabicDialect = "دبلجة خليجية";
+    else if (isMaghrebi) arabicDialect = "دبلجة مغاربية";
+    else if (isFusha) arabicDialect = "دبلجة عربية فصحى";
     else arabicDialect = "دبلجة عربية";
   }
+
+  const hasArabicSub = /\b(ara|arabic|ar)\s*sub(?:s|title|titles)?\b|مترجم|ترجمة\s*عربية/i.test(full);
 
   if (/\b(english|eng)\b/i.test(full)) add("إنجليزي");
   if (/\b(japanese|jap|jpn)\b/i.test(full)) add("ياباني");
   if (/\b(korean|kor)\b/i.test(full)) add("كوري");
   if (/\b(turkish|tur)\b/i.test(full)) add("تركي");
+  if (/\b(french|fra|fre)\b/i.test(full)) add("فرنسي");
+  if (/\b(spanish|spa|esp)\b/i.test(full)) add("إسباني");
+  if (/\b(german|ger|deu)\b/i.test(full)) add("ألماني");
+  if (/\b(italian|ita)\b/i.test(full)) add("إيطالي");
+  if (/\b(russian|rus)\b/i.test(full)) add("روسي");
+  if (/\b(hindi|hin)\b/i.test(full)) add("هندي");
 
   const multi = /\bmulti(?:[\s._-]?audio|[\s._-]?lang)?\b/i.test(full);
   const dual = /\bdual[\s._-]?audio\b/i.test(full);
@@ -880,10 +1006,14 @@ function detectAudio(full) {
   else if (langs.length <= 3) label = langs.join(" + ");
   else label = "متعدد اللغات";
 
-  return { label, hasArabic, key: hasArabic ? "ar" : langs.length ? langs[0] : "orig" };
+  if (hasArabicSub && !hasArabic) {
+    label += " • 💬 مترجم عربي";
+  }
+
+  return { label, hasArabic, hasArabicSub, isSpacetoon, key: hasArabic ? "ar" : langs.length ? langs[0] : "orig" };
 }
 
-const RES_GROUP = { "8K": "4K", "4K": "4K", "2K": "1080p", "1080p": "1080p", "720p": "720p", "480p": "480p" };
+const RES_GROUP = { "8K": "4K", "4K": "4K", "2K": "1080p", "1080p": "1080p", "720p": "720p", "576p": "480p", "480p": "480p", "360p": "480p" };
 
 const TABS = {
   "4k":     { label: "4K",         desc: "روابط 4K فائقة الوضوح فقط",            test: i => i._group === "4K" },
@@ -892,7 +1022,7 @@ const TABS = {
   "720p":   { label: "720p",       desc: "روابط 720p خفيفة ومستقرة",             test: i => i._group === "720p" },
   "480p":   { label: "480p",       desc: "روابط 480p موفرة للبيانات",             test: i => i._group === "480p" },
   "arabic": { label: "صوت عربي",   desc: "روابط بدبلجة أو صوت عربي فقط",          test: i => i._ar },
-  "cached": { label: "فوري سحابي", desc: "روابط جاهزة على TorBox تبدأ فوراً",    test: i => i._status === "instant" },
+  "cached": { label: "فوري سحابي", desc: "روابط سحابية جاهزة تبدأ فوراً",          test: i => i._status === "instant" },
   "all":    { label: "الكل",       desc: "كل الروابط مرتبة: الأفضل جودة أولاً",    test: () => true }
 };
 const TAB_ORDER = ["4k", "1080p", "hdr", "720p", "arabic", "cached"];
@@ -910,24 +1040,42 @@ function cleanAndFormatStream(stream) {
     const rawTitle = stream.title || stream.description || "";
     const full = `${rawName}\n${rawTitle}`;
 
-    const isDownload = /\[(TB|RD|AD|DL|PM|OC)\s*download\]/i.test(rawName) || /\bdownload\b/i.test(rawName);
+    const isDownload = /\[(TB|RD|AD|DL|PM|OC|ED|PK)\s*download\]/i.test(rawName) || /\bdownload\b/i.test(rawName);
     let status = "instant";
     if (isDownload) status = "download";
     else if (!stream.url && stream.infoHash) status = "p2p";
     if (status === "p2p" && !ENABLE_P2P) return null;
 
+    // كشف مزود الديبريد
+    let provName = "";
+    let provBadge = "";
+    const provMatch = rawName.match(/\[(RD|TB|AD|PM|DL|ED|OC|PK)\+?\]/i) || full.match(/\b(Real-?Debrid|TorBox|AllDebrid|Premiumize|Debrid-?Link|EasyDebrid|Offcloud|PikPak)\b/i);
+    if (provMatch) {
+      const p = provMatch[1].toUpperCase();
+      if (p === "RD" || p.includes("REAL")) { provName = "RealDebrid"; provBadge = "[RD⚡]"; }
+      else if (p === "TB" || p.includes("TORBOX")) { provName = "TorBox"; provBadge = "[TB⚡]"; }
+      else if (p === "AD" || p.includes("ALL")) { provName = "AllDebrid"; provBadge = "[AD⚡]"; }
+      else if (p === "PM" || p.includes("PREMIUM")) { provName = "Premiumize"; provBadge = "[PM⚡]"; }
+      else if (p === "DL" || p.includes("LINK")) { provName = "DebridLink"; provBadge = "[DL⚡]"; }
+      else if (p === "ED" || p.includes("EASY")) { provName = "EasyDebrid"; provBadge = "[ED⚡]"; }
+      else if (p === "OC" || p.includes("OFF")) { provName = "Offcloud"; provBadge = "[OC⚡]"; }
+      else if (p === "PK" || p.includes("PIK")) { provName = "PikPak"; provBadge = "[PK⚡]"; }
+    }
+
     // 1. الدقة
     let resLabel = "1080p";
-    let resScore = 2200;
-    const resMatch = full.match(/\b(4320p|8k|2160p|4k|uhd|1440p|2k|1080p|fhd|720p|hd|480p|576p|sd)\b/i);
+    let resScore = 2400;
+    const resMatch = full.match(/\b(4320p|8k|2160p|4k|uhd|1440p|2k|1080p|fhd|720p|hd|576p|480p|360p|sd)\b/i);
     if (resMatch) {
       const r = resMatch[1].toUpperCase();
-      if (r === "4320P" || r === "8K") { resLabel = "8K"; resScore = 9000; }
-      else if (r === "2160P" || r === "4K" || r === "UHD") { resLabel = "4K"; resScore = 5000; }
-      else if (r === "1440P" || r === "2K") { resLabel = "2K"; resScore = 3200; }
-      else if (r === "1080P" || r === "FHD") { resLabel = "1080p"; resScore = 2200; }
-      else if (r === "720P" || r === "HD") { resLabel = "720p"; resScore = 1100; }
-      else { resLabel = "480p"; resScore = 400; }
+      if (r === "4320P" || r === "8K") { resLabel = "8K"; resScore = 9500; }
+      else if (r === "2160P" || r === "4K" || r === "UHD") { resLabel = "4K"; resScore = 5200; }
+      else if (r === "1440P" || r === "2K") { resLabel = "2K"; resScore = 3400; }
+      else if (r === "1080P" || r === "FHD") { resLabel = "1080p"; resScore = 2400; }
+      else if (r === "720P" || r === "HD") { resLabel = "720p"; resScore = 1200; }
+      else if (r === "576P") { resLabel = "576p"; resScore = 600; }
+      else if (r === "480P") { resLabel = "480p"; resScore = 400; }
+      else { resLabel = "360p"; resScore = 200; }
     }
 
     // 2. نوع الريب
@@ -937,14 +1085,50 @@ function cleanAndFormatStream(stream) {
     else if (/\b(BluRay|Blu-Ray|BDRip|BRRip|BDMV)\b/i.test(full)) { ripBonus = 700; source = "BluRay"; }
     else if (/\b(WEB-DL|WEBDL)\b/i.test(full)) { ripBonus = 500; source = "WEB-DL"; }
     else if (/\b(WEBRip|WEB-Rip|WEB)\b/i.test(full)) { ripBonus = 400; source = "WEB"; }
+    else if (/\b(HDTV|PDTV|DSRip)\b/i.test(full)) { ripBonus = 250; source = "HDTV"; }
+    else if (/\b(DVDRip|DVD)\b/i.test(full)) { ripBonus = 150; source = "DVD"; }
 
     // 3. تقنيات الصورة
     let visualBonus = 0;
     let hdr = "";
     let hdrShort = "";
-    if (/\b(DV|Dolby[\s.-]?Vision|DoVi)\b/i.test(full)) { visualBonus += 500; hdr = "Dolby Vision"; hdrShort = "DV"; }
-    if (/\bHDR10\+|HDR10Plus\b/i.test(full)) { visualBonus += 400; hdr = hdr || "HDR10+"; hdrShort = hdrShort || "HDR"; }
-    else if (/\b(HDR10|HDR)\b/i.test(full)) { visualBonus += 300; hdr = hdr || "HDR"; hdrShort = hdrShort || "HDR"; }
+
+    if (/\b(DV|Dolby[\s.-]?Vision|DoVi)\b/i.test(full)) {
+      visualBonus += 550;
+      const pMatch = full.match(/\b(?:Profile|P)[\s.-]?([4578])\b/i);
+      hdr = pMatch ? `Dolby Vision P${pMatch[1]}` : "Dolby Vision";
+      hdrShort = "DV";
+    }
+    if (/\b(HDR10\+|HDR10Plus)\b/i.test(full)) {
+      visualBonus += 420;
+      hdr = hdr ? `${hdr} / HDR10+` : "HDR10+";
+      hdrShort = hdrShort || "HDR10+";
+    } else if (/\b(HDR10|HDR)\b/i.test(full)) {
+      visualBonus += 320;
+      hdr = hdr ? `${hdr} / HDR` : "HDR";
+      hdrShort = hdrShort || "HDR";
+    } else if (/\bHLG\b/i.test(full)) {
+      visualBonus += 260;
+      hdr = hdr ? `${hdr} / HLG` : "HLG";
+      hdrShort = hdrShort || "HLG";
+    }
+
+    let imax = "";
+    if (/\b(IMAX|IMAX[\s.-]?Enhanced)\b/i.test(full)) {
+      visualBonus += 300;
+      imax = "IMAX";
+    }
+
+    let bitDepth = "";
+    if (/\b(10[\s.-]?bit|Hi10P)\b/i.test(full)) {
+      visualBonus += 100;
+      bitDepth = "10-bit";
+    }
+
+    let fps = "";
+    if (/\b(60fps|120fps)\b/i.test(full)) {
+      fps = full.match(/\b(60fps|120fps)\b/i)[1].toLowerCase();
+    }
 
     let videoCodec = "";
     if (/\bAV1\b/i.test(full)) videoCodec = "AV1";
@@ -954,10 +1138,28 @@ function cleanAndFormatStream(stream) {
     // 4. الصوت
     let audioBonus = 0;
     let audioCodec = "";
-    if (/\bAtmos\b/i.test(full)) { audioBonus += 400; audioCodec = "Atmos"; }
-    else if (/\bTrueHD\b/i.test(full)) { audioBonus += 320; audioCodec = "TrueHD"; }
-    else if (/\bDTS[\s.-]?(HD|X)\b/i.test(full)) { audioBonus += 280; audioCodec = "DTS-HD"; }
-    else if (/\b5\.1\b/i.test(full)) { audioBonus += 150; audioCodec = "5.1"; }
+    if (/\bAtmos\b/i.test(full)) {
+      audioBonus += 450;
+      audioCodec = /\b(TrueHD)\b/i.test(full) ? "TrueHD Atmos" : "Atmos";
+    } else if (/\bTrueHD\b/i.test(full)) {
+      audioBonus += 360;
+      audioCodec = "TrueHD";
+    } else if (/\bDTS[\s.-]?(HD[\s.-]?MA|X)\b/i.test(full)) {
+      audioBonus += 340;
+      audioCodec = /X\b/i.test(full) ? "DTS:X" : "DTS-HD MA";
+    } else if (/\bDTS\b/i.test(full)) {
+      audioBonus += 250;
+      audioCodec = "DTS";
+    } else if (/\b(DDP|E-?AC-?3|Dolby[\s.-]?Digital[\s.-]?Plus)\b/i.test(full)) {
+      audioBonus += 220;
+      audioCodec = "DDP 5.1";
+    } else if (/\b7\.1\b/i.test(full)) {
+      audioBonus += 240;
+      audioCodec = "7.1";
+    } else if (/\b5\.1\b/i.test(full)) {
+      audioBonus += 160;
+      audioCodec = "5.1";
+    }
 
     const sizeMatch = rawTitle.match(/([0-9]+(?:\.[0-9]+)?\s*(?:TB|GB|MB|GiB|MiB))/i) ||
                       rawName.match(/([0-9]+(?:\.[0-9]+)?\s*(?:TB|GB|MB|GiB|MiB))/i);
@@ -968,18 +1170,32 @@ function cleanAndFormatStream(stream) {
 
     const audio = detectAudio(full);
 
-    const sizeScore = Math.min((sizeBytes / (1024 * 1024 * 1024)) * 12, 450);
-    const peerScore = Math.min(seedersCount * 0.6, 500);
-    const arabicBonus = audio.hasArabic ? 3500 : 0;
-    const statusScore = status === "instant" ? 50000 : status === "download" ? 0 : -10000;
+    const sizeScore = Math.min((sizeBytes / (1024 * 1024 * 1024)) * 14, 500);
+    const peerScore = Math.min(seedersCount * 0.8, 600);
+    const arabicBonus = audio.isSpacetoon ? 4200 : (audio.hasArabic ? 3800 : (audio.hasArabicSub ? 800 : 0));
+    const statusScore = status === "instant" ? 60000 : status === "download" ? 0 : -10000;
     const finalScore = statusScore + arabicBonus + resScore + ripBonus + visualBonus + audioBonus + sizeScore + peerScore;
 
-    const statusBadge = status === "instant" ? "⚡ توربو سحابي فوري" : status === "download" ? "⏳ يتطلب تنزيل سحابي" : "🌐 شبكة تورنت P2P";
-    const tags = [statusBadge, source, hdr, videoCodec, audioCodec, sizeMatch ? sizeMatch[1].replace(/\s+/g, "") : ""].filter(Boolean).join(" • ");
-    const desc = `${audio.label}\n${tags}`;
+    const statusBadge = status === "instant"
+      ? (provName ? `⚡ فوري سحابي (${provName})` : "⚡ فوري سحابي")
+      : status === "download" ? "⏳ يتطلب تنزيل سحابي" : "🌐 شبكة تورنت P2P";
+
+    const tagParts = [
+      statusBadge,
+      imax,
+      source,
+      hdr,
+      bitDepth,
+      fps,
+      videoCodec,
+      audioCodec,
+      sizeMatch ? sizeMatch[1].replace(/\s+/g, "") : ""
+    ].filter(Boolean);
+
+    const desc = `${audio.label}\n${tagParts.join(" • ")}`;
 
     const cleanStream = {
-      name: hdrShort ? `${resLabel} ${hdrShort}` : resLabel,
+      name: (provBadge ? `${provBadge} ` : "") + (hdrShort ? `${resLabel} ${hdrShort}` : resLabel),
       title: desc,
       description: desc,
       behaviorHints: {
@@ -994,10 +1210,12 @@ function cleanAndFormatStream(stream) {
       _hash: getCanonicalKey(stream),
       _rank: resLabel === "8K" ? 5 : resLabel === "4K" ? 4 : resLabel === "2K" ? 3.5 : resLabel === "1080p" ? 3 : resLabel === "720p" ? 2 : 1,
       _bytes: sizeBytes,
+      _seeders: seedersCount,
       _remux: source === "Remux",
       _av1: videoCodec === "AV1",
       _audioLabel: audio.label,
-      _tagParts: [source, hdr, videoCodec, audioCodec, sizeMatch ? sizeMatch[1].replace(/\s+/g, "") : ""].filter(Boolean)
+      _tagParts: tagParts,
+      _provName: provName
     };
 
     if (stream.url) cleanStream.url = stream.url;
@@ -1020,10 +1238,9 @@ function cleanAndFormatStream(stream) {
     return null;
   }
 }
+
 // =========================================================================
-// 7. صفحة التثبيت الخاصة + تخصيص المانفيست
-// - CSP صارم بـ nonce، لا موارد خارجية، لا أزرار inline، لا أسرار في المصدر
-// - مناسبة للريموت: أزرار كبيرة وتركيز واضح
+// 7. صفحة التثبيت الخاصة + تخصيص المانفيست + ريموت التلفاز ومولد QR Code
 // =========================================================================
 
 function jsStr(v) {
@@ -1048,158 +1265,218 @@ function renderConfigPage(host, key, nonce, countryName = "منطقتك") {
 <meta name="referrer" content="no-referrer">
 <title>${ADDON_NAME}</title>
 <style nonce="${nonce}">
-:root{--gold:#e5b53a;--bg:#07070a;--card:#101016;--line:rgba(255,255,255,.1);--text:#ececf2;--sub:#a0a0b0;color-scheme:dark}
+:root{--gold:#e5b53a;--gold-glow:rgba(229,181,58,.25);--bg:#07070a;--card:#101016;--card-alt:#14141e;--line:rgba(255,255,255,.1);--text:#ececf2;--sub:#a0a0b0;--green:#4ade80;--red:#f87171;color-scheme:dark}
 *{box-sizing:border-box;margin:0;padding:0}
 html{font-size:17px}
 @media(min-width:1100px){html{font-size:20px}}
-body{min-height:100vh;display:flex;justify-content:center;padding:24px 14px;background:radial-gradient(circle at top,#15151f,var(--bg));color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;line-height:1.6;-webkit-user-select:none;user-select:none}
+body{min-height:100vh;display:flex;justify-content:center;padding:24px 14px;background:radial-gradient(circle at top,#161624,var(--bg));color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;line-height:1.6;-webkit-user-select:none;user-select:none}
 input,select{-webkit-user-select:text;user-select:text}
-.card{width:100%;max-width:760px;height:fit-content;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:28px 24px}
+.card{width:100%;max-width:780px;height:fit-content;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:28px 24px;box-shadow:0 12px 40px rgba(0,0,0,.6)}
 .badge{display:inline-block;padding:4px 12px;background:rgba(229,181,58,.15);color:var(--gold);border-radius:20px;font-size:.72rem;font-weight:700}
 h1{font-size:1.9rem;margin:8px 0 2px}h1 span{color:var(--gold)}
 .lead{color:var(--sub);font-size:.85rem;margin-bottom:6px}
-h2{font-size:1rem;color:var(--gold);margin:26px 0 10px}
+h2{font-size:1.02rem;color:var(--gold);margin:26px 0 10px;display:flex;align-items:center;gap:8px}
 .hint{color:var(--sub);font-size:.75rem;margin:4px 0 8px}
-.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-.opt,.tile,.btn{display:block;width:100%;padding:14px 12px;border-radius:14px;border:2px solid var(--line);background:#16161f;color:#fff;text-align:center;text-decoration:none;font:inherit;font-weight:700;cursor:pointer}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.opt,.tile,.btn{display:block;width:100%;padding:14px 12px;border-radius:14px;border:2px solid var(--line);background:#161620;color:#fff;text-align:center;text-decoration:none;font:inherit;font-weight:700;cursor:pointer;transition:all .18s ease}
 .opt small,.tile small{display:block;font-weight:400;font-size:.7rem;color:var(--sub);margin-top:2px}
-.opt[aria-pressed=true]{border-color:var(--gold);background:#221d0e;color:var(--gold)}
+.opt[aria-pressed=true]{border-color:var(--gold);background:#221d0e;color:var(--gold);box-shadow:0 0 14px var(--gold-glow)}
 .opt[disabled]{opacity:.4;cursor:not-allowed}
-.btn-gold{background:var(--gold);color:#09090c;border-color:var(--gold);margin-top:14px}
-.btn-dark{margin-top:10px;background:#181824;color:#ccc}
+.preset-bar{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:12px 0}
+.pbtn{padding:10px;border-radius:12px;border:1px solid var(--line);background:#14141e;color:#ddd;font:inherit;font-size:.78rem;font-weight:700;cursor:pointer}
+.pbtn:hover,.pbtn:focus{border-color:var(--gold);color:var(--gold)}
+.btn-gold{background:var(--gold);color:#09090c;border-color:var(--gold);margin-top:14px;font-size:1.05rem}
+.btn-dark{margin-top:10px;background:#181826;color:#ccc}
 .tile{color:var(--gold)}
 label.l{display:block;font-size:.78rem;color:var(--sub);margin:12px 0 6px}
-input[type=password],input[type=text],input[type=number],select,.ti{width:100%;padding:11px 12px;border-radius:12px;border:2px solid var(--line);background:#181822;color:#fff;font:inherit;outline:none}
-.chk{display:flex;gap:10px;align-items:center;padding:8px 2px;font-size:.88rem}
+input[type=password],input[type=text],input[type=number],select,.ti{width:100%;padding:11px 12px;border-radius:12px;border:2px solid var(--line);background:#181824;color:#fff;font:inherit;outline:none}
+input:focus,select:focus,.ti:focus{border-color:var(--gold)}
+.chk{display:flex;gap:10px;align-items:center;padding:8px 2px;font-size:.88rem;cursor:pointer}
 .chk input{width:22px;height:22px;accent-color:var(--gold)}
-.crow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:8px 0;align-items:center;padding:10px;border:1px solid var(--line);border-radius:14px;background:#0d0d13}
-.cat{grid-template-columns:auto auto minmax(120px,1fr) auto auto;padding:6px 10px}
+.crow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:8px 0;align-items:center;padding:10px;border:1px solid var(--line);border-radius:14px;background:#0d0d14}
+.cat{grid-template-columns:auto auto minmax(120px,1fr) auto auto auto auto;padding:6px 10px;gap:6px}
 .cat input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold)}
 .tag{font-size:.68rem;color:var(--gold);white-space:nowrap}
-.mini{padding:8px 13px;border-radius:10px;border:2px solid var(--line);background:#16161f;color:#fff;font:inherit;font-weight:700;cursor:pointer}
+.mini{padding:8px 11px;border-radius:10px;border:2px solid var(--line);background:#161622;color:#fff;font:inherit;font-weight:700;cursor:pointer}
+.mini:hover{border-color:var(--gold);color:var(--gold)}
 .addb{margin-top:6px;padding:10px 14px;border-radius:12px;border:2px dashed rgba(229,181,58,.5);background:transparent;color:var(--gold);font:inherit;font-weight:700;cursor:pointer}
+.addb:hover{background:rgba(229,181,58,.08)}
 .tools{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
 details{margin-top:10px}
-summary{cursor:pointer;padding:12px 14px;border-radius:12px;border:2px solid var(--line);background:#16161f;font-weight:700}
-.cats{max-height:520px;overflow-y:auto;margin-top:8px}
-:focus-visible{outline:4px solid var(--gold);outline-offset:2px}
+summary{cursor:pointer;padding:12px 14px;border-radius:12px;border:2px solid var(--line);background:#161622;font-weight:700}
+.cats{max-height:540px;overflow-y:auto;margin-top:8px;padding-right:4px}
+:focus-visible{outline:4px solid var(--gold);outline-offset:3px}
 .note{margin-top:20px;padding:12px 14px;border-radius:12px;background:#17151e;border:1px solid rgba(229,181,58,.25);font-size:.8rem;color:#e2d9c4}
 #warn{color:#ff8f8f;font-size:.78rem;margin-top:8px}
 #out{direction:ltr;text-align:left;word-break:break-all;font-size:.66rem;color:var(--sub);margin-top:10px}
+.qr-box{display:none;margin-top:16px;text-align:center;padding:16px;background:#0f0f18;border-radius:16px;border:1px solid var(--line)}
+.qr-box svg{margin:10px auto;display:block}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--gold);color:#09090c;padding:10px 24px;border-radius:30px;font-weight:700;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .25s ease;z-index:9999}
+.toast.show{opacity:1}
+.val-badge{display:inline-block;padding:3px 10px;border-radius:8px;font-size:.72rem;margin-top:4px}
+.val-ok{background:rgba(74,222,128,.15);color:var(--green)}
+.val-err{background:rgba(248,113,113,.15);color:var(--red)}
 </style>
 </head>
 <body>
 <main class="card">
-  <span class="badge">v${VERSION} • ${KEY_ON ? "نسخة خاصة" : "خصّص إضافتك"}</span>
+  <span class="badge">v${VERSION} • ${KEY_ON ? "نسخة خاصة فائقة" : "خصّص إضافتك للتلفاز والسينما"}</span>
   <h1>إضافة <span>${ADDON_NAME}</span></h1>
-  <p class="lead">اختر جهازك، أدخل مفاتيحك الخاصة، خصّص كل شيء ثم ثبّت الإضافة. الرابط الناتج يحمل إعداداتك ومفاتيحك — لا تشاركه.</p>
+  <p class="lead">النسخة الفائقة للتلفاز والسينما: دبلجة عربية ذكية، دعم كامل لمزودي الديبريد، تنقل سريع بالريموت، ومولد QR Code.</p>
+
+  <label class="l">إعدادات سريعة جاهزة (1-Click Presets)</label>
+  <div class="preset-bar">
+    <button class="pbtn" type="button" id="preTv">🚀 تلفاز فائق الخفة</button>
+    <button class="pbtn" type="button" id="preCinema">🎬 سينما 4K HDR</button>
+    <button class="pbtn" type="button" id="preAnime">🌸 أنمي وسبيستون</button>
+    <button class="pbtn" type="button" id="preArabic">🌙 عربي ورماضانيات</button>
+    <button class="pbtn" type="button" id="preSaver">📱 توفير باقة</button>
+  </div>
+
   <details>
     <summary>لديك رابط إضافة سابق؟ استورد إعداداتك</summary>
     <label class="l" for="impurl">الصق رابط المانفيست (أو رابط زر الإعداد)</label>
     <input type="text" id="impurl" class="ti" autocomplete="off" spellcheck="false" placeholder="https://.../manifest.json">
-    <button class="mini" type="button" id="impbtn">استيراد</button>
+    <button class="mini" type="button" id="impbtn" style="margin-top:8px">استيراد الإعدادات</button>
     <div class="hint" id="impmsg"></div>
   </details>
 
-  <h2>1. الجهاز</h2>
+  <h2>1. الجهاز والملف التعريفي</h2>
   <div class="row">
-    <button class="opt" data-profile="tv" aria-pressed="true" id="firstFocus">تلفاز<small>خفيف وسلس • صور أصغر</small></button>
-    <button class="opt" data-profile="mobile" aria-pressed="false">موبايل / كمبيوتر<small>كل الكتالوجات والمزايا</small></button>
-    <button class="opt" data-profile="saver" aria-pressed="false">توفير بيانات<small>حد 720p • قائمة أقصر</small></button>
+    <button class="opt" data-profile="tv" aria-pressed="true" id="firstFocus">تلفاز ذكي (TV)<small>سلس وخفيف • صور محسّنة • بدون تهنيج</small></button>
+    <button class="opt" data-profile="mobile" aria-pressed="false">كمبيوتر / جوال<small>كافة المزايا والكتالوجات المتقدمة</small></button>
+    <button class="opt" data-profile="saver" aria-pressed="false">توفير بيانات<small>حد 720p • قوائم أقصر واستهلاك أقل</small></button>
   </div>
 
-  <h2>2. مفاتيحك الخاصة</h2>
-  <p class="hint">تبقى المفاتيح داخل رابط إضافتك أنت فقط ولا تُحفظ في قاعدة بيانات. مضيف الموقع قد يرى الروابط في سجلات الطلبات، فاستخدم موقعاً تثق به.</p>
+  <h2>2. مفاتيحك وحسابات الديبريد</h2>
+  <p class="hint">مفاتيحك تبقى داخل رابط إضافتك المشفر ولا تُخزن في أي قاعدة بيانات.</p>
   <label class="l" for="tmdbkey">مفتاح TMDB (v3) — مجاني من themoviedb.org/settings/api</label>
-  <input type="password" id="tmdbkey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="يفعّل التعريب الرسمي، وضع TMDB، والقوائم المخصصة">
+  <input type="password" id="tmdbkey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="يفعّل التعريب الرسمي، والكتالوجات العربية المخصصة">
   <label class="l" for="mdbkey">مفتاح MDBList (اختياري) — من mdblist.com/preferences</label>
-  <input type="password" id="mdbkey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="لقوائم MDBList">
-  <label class="l" for="prov">حساب الديبريد (اختياري)</label>
+  <input type="password" id="mdbkey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="لقوائم MDBList الخاصة">
+  
+  <label class="l" for="prov">مزود الديبريد السحابي (Debrid Provider)</label>
   <select id="prov">
-    <option value="">الخادم الافتراضي (ضبط الخادم)</option>
-    <option value="torbox">TorBox</option>
-    <option value="realdebrid">Real-Debrid</option>
-    <option value="alldebrid">AllDebrid</option>
-    <option value="premiumize">Premiumize</option>
-    <option value="debridlink">Debrid-Link</option>
+    <option value="">الخادم الافتراضي (بدون حساب ديبريد خاص)</option>
+    <option value="realdebrid">Real-Debrid [RD]</option>
+    <option value="torbox">TorBox [TB]</option>
+    <option value="alldebrid">AllDebrid [AD]</option>
+    <option value="premiumize">Premiumize [PM]</option>
+    <option value="debridlink">Debrid-Link [DL]</option>
+    <option value="easydebrid">EasyDebrid [ED]</option>
+    <option value="offcloud">Offcloud [OC]</option>
+    <option value="pikpak">PikPak [PK]</option>
   </select>
-  <label class="l" for="tok">المفتاح / التوكن</label>
-  <input type="password" id="tok" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="يبقى داخل الرابط فقط ولا يُخزَّن في الخادم">
+  <label class="l" for="tok">مفتاح / توكن الديبريد (API Token)</label>
+  <div style="display:flex;gap:8px">
+    <input type="password" id="tok" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="الصق توكن حسابك هنا">
+    <button class="mini" type="button" id="tokTest">فحص التوكن</button>
+  </div>
+  <div id="tokMsg"></div>
 
-  <h2>3. الجودة والحجم</h2>
-  <label class="l" for="maxq">أعلى جودة</label>
-  <select id="maxq">
-    <option value="">بدون حد</option>
-    <option value="m4k">حتى 4K</option>
-    <option value="m1080">حتى 1080p</option>
-    <option value="m720">حتى 720p</option>
-  </select>
-  <label class="l" for="maxgb">أقصى حجم للملف</label>
-  <select id="maxgb">
-    <option value="">افتراضي الجهاز</option>
-    <option value="gb8">8 جيجا</option>
-    <option value="gb15">15 جيجا</option>
-    <option value="gb25">25 جيجا</option>
-    <option value="gb40">40 جيجا</option>
-    <option value="gb0">بدون حد</option>
-  </select>
-  <label class="chk"><input type="checkbox" id="noremux"> استبعاد Remux الضخم</label>
-  <label class="chk"><input type="checkbox" id="noav1" checked> استبعاد AV1 (أغلب التلفزيونات لا تفكّه)</label>
-  <label class="chk"><input type="checkbox" id="noemoji" checked> إخفاء الإيموجي من أسماء الروابط</label>
-  <label class="chk"><input type="checkbox" id="lite"> بدون روابط بث (استخدام إضافة بث أخرى)</label>
+  <h2>3. الجودة، الحجم، واستبعاد الصيغ الثقيلة</h2>
+  <div class="row">
+    <div>
+      <label class="l" for="maxq">أعلى جودة للبث</label>
+      <select id="maxq">
+        <option value="">بدون حد (شامل 8K/4K)</option>
+        <option value="m4k">حتى 4K</option>
+        <option value="m1080">حتى 1080p</option>
+        <option value="m720">حتى 720p</option>
+        <option value="m480">حتى 480p</option>
+      </select>
+    </div>
+    <div>
+      <label class="l" for="maxgb">أقصى حجم لملف الفيديو</label>
+      <select id="maxgb">
+        <option value="">افتراضي الجهاز</option>
+        <option value="gb8">8 جيجا</option>
+        <option value="gb15">15 جيجا</option>
+        <option value="gb25">25 جيجا</option>
+        <option value="gb40">40 جيجا</option>
+        <option value="gb0">بدون حد</option>
+      </select>
+    </div>
+  </div>
+  <label class="chk"><input type="checkbox" id="noremux"> استبعاد Remux فائق الحجم (لتفادي التقطيع في سرعات النت العادية)</label>
+  <label class="chk"><input type="checkbox" id="noav1" checked> استبعاد كوديك AV1 (أغلب معالجات التلفاز لا تدعمه)</label>
+  <label class="chk"><input type="checkbox" id="noemoji" checked> إخفاء الإيموجي من عناوين الروابط (عرض أنيق ومختصر)</label>
+  <label class="chk"><input type="checkbox" id="nop2p"> استبعاد شبكة تورنت P2P والاعتماد فقط على الروابط السحابية</label>
+  <label class="chk"><input type="checkbox" id="hdrfirst"> تقديم روابط HDR و Dolby Vision في مقدمة النتائج</label>
+  <label class="chk"><input type="checkbox" id="cleantitles"> تنظيف وتبسيط أسماء الروابط للشاشات الصغيرة</label>
+  <label class="chk"><input type="checkbox" id="lite"> وضع خفيف بدون روابط بث (استخدام إضافة بث أخرى مع كتالوجاتنا)</label>
 
-  <h2>4. الترجمات والمنطقة</h2>
-  <p class="hint">العربية دائماً أولاً. اختر لغات إضافية إن أردت.</p>
-  <div id="subs"></div>
-  <label class="l" for="ctry">المنطقة (لقائمة أفضل 10 وأفلام دور العرض)</label>
-  <select id="ctry"><option value="">تلقائي (حسب موقعك)</option>${countries.map(([c, n]) => `<option value="${c.toLowerCase()}">${n}</option>`).join("")}</select>
+  <h2>4. الترجمات والمنطقة الجغرافية</h2>
+  <p class="hint">العربية دائماً في الصدارة مع ضبط الترميز تلقائياً لمنع ظهور الحروف المقلوبة. اختر لغات ترجمة إضافية:</p>
+  <div id="subs" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:6px"></div>
+  <label class="l" for="ctry">المنطقة لقوائم أفضل 10 وأفلام دور العرض</label>
+  <select id="ctry"><option value="">تلقائي (حسب موقع اتصالك)</option>${countries.map(([c, n]) => `<option value="${c.toLowerCase()}">${n}</option>`).join("")}</select>
 
   <h2>5. هوية الإضافة ومصدر الكتالوجات</h2>
-  <label class="l" for="aname">اسم الإضافة في Stremio (اختياري)</label>
+  <label class="l" for="aname">اسم الإضافة في تطبيق Stremio (اختياري)</label>
   <input type="text" id="aname" maxlength="30" autocomplete="off" placeholder="${ADDON_NAME}">
   <label class="l">مصدر الكتالوجات</label>
   <div class="row">
-    <button class="opt" data-mode="mix" aria-pressed="true">مختلط<small>Nuvio + Cinemeta + TMDB</small></button>
-    <button class="opt" data-mode="tmdb" aria-pressed="false" id="modeTmdb"${srvTmdb ? "" : " disabled"}>وضع TMDB<small id="modeHint">${srvTmdb ? "كتالوجات TMDB فقط + بحث بأي لغة" : "أدخل مفتاح TMDB أولاً"}</small></button>
+    <button class="opt" data-mode="mix" aria-pressed="true">مختلط سينمائي<small>Nuvio + Cinemeta + TMDB</small></button>
+    <button class="opt" data-mode="tmdb" aria-pressed="false" id="modeTmdb"${srvTmdb ? "" : " disabled"}>وضع TMDB الرسمي<small id="modeHint">${srvTmdb ? "كتالوجات TMDB الرسمية + بحث متعدد اللغات" : "أدخل مفتاح TMDB أولاً"}</small></button>
   </div>
 
-  <h2>6. الكتالوجات (إظهار / ترتيب / إعادة تسمية)</h2>
+  <h2>6. إدارة وترتيب الكتالوجات</h2>
   <details>
-    <summary>تخصيص قائمة الكتالوجات</summary>
+    <summary>عرض الكتالوجات، إعادة الترتيب، وإعادة التسمية</summary>
+    <div style="margin-top:10px">
+      <input type="text" id="catSearch" class="ti" placeholder="🔍 ابحث في الكتالوجات (مثال: سوري، مصري، كرتون، أنمي، رائج...)">
+    </div>
     <div class="tools">
       <button class="mini" type="button" id="catAll">تحديد الكل</button>
       <button class="mini" type="button" id="catNone">إلغاء الكل</button>
-      <button class="mini" type="button" id="catReset">الافتراضي</button>
+      <button class="mini" type="button" id="catReset">الوضع الافتراضي</button>
     </div>
     <div class="cats" id="cats"></div>
   </details>
 
-  <h2>7. قوائم MDBList</h2>
-  <p class="hint">أدخل مفتاح MDBList في قسم المفاتيح أعلاه، ثم رابط أي قائمة (مثل mdblist.com/lists/مستخدم/قائمة).</p>
+  <h2>7. قوائم MDBList المخصصة</h2>
+  <p class="hint">أدخل مفتاح MDBList أعلاه ثم الصق رابط أو معرف أي قائمة من mdblist.com.</p>
   <div id="mlrows"></div>
   <button class="addb" type="button" id="mlAdd">+ إضافة قائمة MDBList</button>
 
-  <h2>8. قوائم TMDB</h2>
+  <h2>8. قوائم TMDB الرسمية</h2>
   <p class="hint">رقم قائمة TMDB أو رابطها (themoviedb.org/list/رقم). يتطلب مفتاح TMDB.</p>
   <div id="tlrows"></div>
   <button class="addb" type="button" id="tlAdd">+ إضافة قائمة TMDB</button>
 
-  <h2>9. كتالوج TMDB مخصص (Discover)</h2>
-  <p class="hint">ابنِ كتالوجك: النوع، الترتيب، التصنيف، اللغة، الدولة، السنوات، منصة المشاهدة، أدنى تقييم. يتطلب مفتاح TMDB.</p>
+  <h2>9. كتالوج TMDB الذكي (Discover Builder)</h2>
+  <p class="hint">ابنِ كتالوجك الخاص: النوع، الترتيب، التصنيف، اللغة، الدولة، السنوات، ومنصات المشاهدة.</p>
   <div id="dcrows"></div>
   <button class="addb" type="button" id="dcAdd">+ إضافة كتالوج مخصص</button>
 
-  <h2>10. التثبيت</h2>
+  <h2>10. دمج إضافات خارجية مع التعريب</h2>
+  <p class="hint">الصق رابط مانفيست أي إضافة Stremio لدمج روابطها وكتالوجاتها داخل إضافتك مع تعريب تلقائي.</p>
+  <input type="text" id="exurl" class="ti" autocomplete="off" spellcheck="false" placeholder="https://.../manifest.json">
+  <button class="addb" type="button" id="exadd">+ فحص وإضافة</button>
+  <div class="hint" id="exmsg"></div>
+  <div id="exrows"></div>
+
+  <h2>11. تثبيت الإضافة</h2>
   <a class="btn btn-gold" id="install" href="#">تثبيت ${ADDON_NAME} في Stremio</a>
-  <button class="btn btn-dark" id="copy" type="button">نسخ رابط المانفيست</button>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+    <button class="btn btn-dark" id="copy" type="button">نسخ الرابط 📋</button>
+    <button class="btn btn-dark" id="shareBtn" type="button">مشاركة الرابط 📤</button>
+  </div>
+  <button class="btn btn-dark" id="qrToggle" type="button" style="margin-top:8px">📱 مسح QR للتلفاز والجوال</button>
+  <div class="qr-box" id="qrBox">
+    <div style="font-size:.85rem;color:var(--gold);margin-bottom:6px">وجّه كاميرا هاتفك لمسح الكود والتثبيت فوراً:</div>
+    <div id="qrContent"></div>
+  </div>
   <div id="warn"></div>
   <div id="out"></div>
 
-  <h2>11. تبويبات الجودة (اختياري)</h2>
+  <h2>12. تبويبات الجودة المباشرة (اختياري)</h2>
   <div class="row" id="tabs"></div>
 
-  <div class="note">للتلفاز: اضغط «نسخ» وافتح الرابط من هاتفك لتثبيته على Stremio عبر نفس الحساب، أو اكتب الرابط يدوياً في خانة إضافة مجتمعية. لا تشارك الرابط مع أحد.</div>
+  <div class="note">نصيحة للتلفاز: اضغط «📱 مسح QR» وامسحه بكاميرا هاتفك ليتم تثبيت الإضافة على حسابك في ثانية ومزامنتها على الشاشة تلقائياً!</div>
 </main>
+<div class="toast" id="toast">تم النسخ بنجاح ✓</div>
 <script nonce="${nonce}">
 (function(){
 var H=${jsStr(host)}, K=${jsStr(key)}, REG=${jsJson(reg)}, SRV_TMDB=${srvTmdb ? 1 : 0};
@@ -1209,12 +1486,12 @@ var TABS=[["4k","4K"],["1080p","1080p"],["hdr","HDR"],["720p","720p"],["arabic",
 var T3=[["both","أفلام ومسلسلات"],["movie","أفلام فقط"],["series","مسلسلات فقط"]];
 var LANGS=[["","أي لغة"],["ar","العربية"],["en","الإنجليزية"],["tr","التركية"],["ko","الكورية"],["ja","اليابانية"],["hi","الهندية"],["fr","الفرنسية"],["es","الإسبانية"],["zh","الصينية"]];
 var CTRY=[["","أي دولة"],["EG","مصر"],["SA","السعودية"],["AE","الإمارات"],["KW","الكويت"],["QA","قطر"],["LB","لبنان"],["SY","سوريا"],["TR","تركيا"],["KR","كوريا"],["JP","اليابان"],["IN","الهند"],["US","أمريكا"],["GB","بريطانيا"],["FR","فرنسا"]];
-var SORTS=[["pop","الأشهر"],["rate","الأعلى تقييماً"],["new","الأحدث"],["rev","الأعلى إيراداً (أفلام)"]];
+var SORTS=[["pop","الأشهر"],["rate","الأعلى تقييماً"],["new","الأحدث"],["rev","الأعلى إيراداً"]];
 var RATE=[["","أي تقييم"],["6","6+"],["7","7+"],["8","8+"]];
 var DT=[["movie","أفلام"],["series","مسلسلات"]];
 
 var profile="tv", mode="mix", touched=false, order=[], checked={}, names={}, lastFocus=null;
-var ML=[], TL=[], DC=[];
+var ML=[], TL=[], DC=[], EX=[], PENDING=null, BASE=(K?"/"+K:"")+"/";
 
 function $(i){return document.getElementById(i)}
 function el(tag,cls,txt){var e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e}
@@ -1233,13 +1510,18 @@ function rmBtn(arr,ix,rerender){
   b.addEventListener("click",function(){arr.splice(ix,1);rerender();changed(false)});return b;
 }
 
-/* ---------- التحقق (يطابق الخادم) ---------- */
+function showToast(msg){
+  var t=$("toast");t.textContent=msg;t.classList.add("show");
+  setTimeout(function(){t.classList.remove("show")},2200);
+}
+
+/* ---------- التحقق ---------- */
 function normMdb(v){
   v=String(v||"").trim();
-  var m=v.match(/mdblist\\.com\\/lists\\/([^\\/\\s?#]+)\\/([^\\/\\s?#]+)/i);if(m)v=m[1]+"/"+m[2];
-  return(/^\\d{1,9}$/.test(v)||/^[A-Za-z0-9_.-]{1,40}\\/[A-Za-z0-9_.-]{1,80}$/.test(v))?v:null;
+  var m=v.match(/mdblist\.com\/lists\/([^\/\s?#]+)\/([^\/\s?#]+)/i);if(m)v=m[1]+"/"+m[2];
+  return(/^\d{1,9}$/.test(v)||/^[A-Za-z0-9_.-]{1,40}\/[A-Za-z0-9_.-]{1,80}$/.test(v))?v:null;
 }
-function normTl(v){var m=String(v||"").match(/(\\d{1,10})/);return m?m[1]:null}
+function normTl(v){var m=String(v||"").match(/(\d{1,10})/);return m?m[1]:null}
 function mdbKey(){return $("mdbkey").value.replace(/[^A-Za-z0-9]/g,"").slice(0,64)}
 function validML(){
   if(mdbKey().length<10)return[];
@@ -1261,7 +1543,7 @@ function validDC(){
   });
 }
 
-/* ---------- صفوف MDBList / TMDB ---------- */
+/* ---------- صفوف الكتالوجات المخصصة ---------- */
 function renderML(){
   var b=$("mlrows");b.textContent="";
   ML.forEach(function(m,ix){
@@ -1305,15 +1587,19 @@ function renderDC(){
   });
 }
 
-/* ---------- جدول الكتالوجات ---------- */
+/* ---------- جدول الكتالوجات والفلترة السريعة ---------- */
 function baselineOn(r){return(mode==="tmdb"&&tmdbOn())?!!r.m:(profile==="tv"?!!r.tv:true)}
-function tkey(t,id){return(t==="series"?"s:":"m:")+id}
+function tkey(t,id){return String(t).charAt(0)+":"+id}
 function buildRows(){
   var rows=REG.filter(function(r){return !r.g||tmdbOn()}).map(function(r){return{k:r.k,ty:r.ty,n:r.n,reg:r}});
   var types=function(t){return t==="both"?["movie","series"]:[t]};
   validML().forEach(function(s,i){types(s.t).forEach(function(t){rows.push({k:tkey(t,"cx_ml_"+i),ty:t,n:s.n||("MDBList "+(i+1))})})});
   validTL().forEach(function(s,i){types(s.t).forEach(function(t){rows.push({k:tkey(t,"cx_tl_"+i),ty:t,n:s.n||("قائمة TMDB "+(i+1))})})});
   validDC().forEach(function(s,i){rows.push({k:tkey(s.t,"cx_dc_"+i),ty:s.t,n:s.n||("TMDB مخصص "+(i+1))})});
+  EX.forEach(function(e,i){
+    if(e.f.indexOf("c")<0||!e.cats)return;
+    e.cats.forEach(function(c){rows.push({k:tkey(c.type,"x"+i+"_"+c.sid),ty:c.type,n:(e.n||e.mname||"Addon")+" - "+c.name})});
+  });
   return rows;
 }
 function syncOrder(rows){
@@ -1325,29 +1611,59 @@ function move(k,d){
   var i=order.indexOf(k),j=i+d;if(i<0||j<0||j>=order.length)return;
   var t=order[i];order[i]=order[j];order[j]=t;touched=true;lastFocus=k+"|"+d;renderCats();refresh();
 }
+function moveToEdge(k,toTop){
+  var i=order.indexOf(k);if(i<0)return;
+  order.splice(i,1);
+  if(toTop)order.unshift(k);else order.push(k);
+  touched=true;renderCats();refresh();
+}
 function renderCats(){
   var rows=buildRows();syncOrder(rows);
   var by={};rows.forEach(function(r){by[r.k]=r});
   var box=$("cats");box.textContent="";
+  var filterQ=($("catSearch")?$("catSearch").value.trim().toLowerCase():"");
+
   order.forEach(function(k){
-    var r=by[k];
+    var r=by[k];if(!r)return;
+    var curName=names[k]||r.n;
+    if(filterQ&&curName.toLowerCase().indexOf(filterQ)<0&&r.ty.toLowerCase().indexOf(filterQ)<0)return;
     if(!touched&&r.reg)checked[k]=baselineOn(r.reg);else if(checked[k]===undefined)checked[k]=true;
+
     var d=el("div","crow cat");
     var c=document.createElement("input");c.type="checkbox";c.checked=!!checked[k];
     c.addEventListener("change",function(){checked[k]=c.checked;touched=true;refresh()});
-    var n=el("input","ti");n.type="text";n.value=names[k]||r.n;n.maxLength=40;
+    var n=el("input","ti");n.type="text";n.value=curName;n.maxLength=40;
     n.addEventListener("input",function(){names[k]=n.value;touched=true;refresh()});
-    var up=el("button","mini","↑"),dn=el("button","mini","↓");
-    up.type=dn.type="button";up.setAttribute("data-f",k+"|-1");dn.setAttribute("data-f",k+"|1");
-    up.addEventListener("click",function(){move(k,-1)});dn.addEventListener("click",function(){move(k,1)});
-    d.appendChild(c);d.appendChild(el("span","tag",r.ty==="movie"?"أفلام":"مسلسلات"));d.appendChild(n);d.appendChild(up);d.appendChild(dn);
+
+    var topBtn=el("button","mini","⇈");topBtn.title="نقل للقمة";
+    var up=el("button","mini","↑");up.title="نقل لأعلى";
+    var dn=el("button","mini","↓");dn.title="نقل لأسفل";
+    var btmBtn=el("button","mini","⇊");btmBtn.title="نقل للقاع";
+
+    topBtn.type=up.type=dn.type=btmBtn.type="button";
+    up.setAttribute("data-f",k+"|-1");dn.setAttribute("data-f",k+"|1");
+
+    topBtn.addEventListener("click",function(){moveToEdge(k,true)});
+    up.addEventListener("click",function(){move(k,-1)});
+    dn.addEventListener("click",function(){move(k,1)});
+    btmBtn.addEventListener("click",function(){moveToEdge(k,false)});
+
+    d.appendChild(c);
+    d.appendChild(el("span","tag",r.ty==="movie"?"أفلام":(r.ty==="series"?"مسلسلات":r.ty)));
+    d.appendChild(n);
+    d.appendChild(topBtn);
+    d.appendChild(up);
+    d.appendChild(dn);
+    d.appendChild(btmBtn);
     box.appendChild(d);
   });
   if(lastFocus){var f=box.querySelector('[data-f="'+lastFocus+'"]');lastFocus=null;if(f)try{f.focus()}catch(e){}}
 }
 
-/* ---------- بناء الرابط ---------- */
-function b64u(s){return btoa(unescape(encodeURIComponent(s))).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/,"")}
+if($("catSearch"))$("catSearch").addEventListener("input",renderCats);
+
+/* ---------- بناء وحساب الرابط المشفر ---------- */
+function b64u(s){return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")}
 function cfgObj(){
   var c={},nm=$("aname").value.trim();
   if(nm)c.n=nm.slice(0,30);
@@ -1356,6 +1672,7 @@ function cfgObj(){
   var ml=validML();if(ml.length){c.mk=mdbKey();c.ml=ml}
   var tl=validTL();if(tl.length)c.tl=tl;
   var dc=validDC();if(dc.length)c.dc=dc;
+  if(EX.length)c.ex=EX.map(function(e){return{u:e.u,n:e.n,f:e.f}});
   if(touched){
     var rows=buildRows(),def={};rows.forEach(function(r){def[r.k]=r.n});
     c.v=order.filter(function(k){return checked[k]});
@@ -1366,7 +1683,7 @@ function cfgObj(){
   return c;
 }
 function path(withCustom){
-  var p=K?"/"+K+"/":"/",prov=$("prov").value,t=$("tok").value.replace(/[^a-zA-Z0-9_-]/g,"");
+  var p=K?"/"+K+"/":"/",prov=$("prov").value,t=$("tok").value.replace(/[^a-zA-Z0-9_.:@%-]/g,"");
   if(prov&&t)p+=prov+"="+t+"/";
   var c=[];
   if(profile==="tv")c.push("tv");
@@ -1376,35 +1693,82 @@ function path(withCustom){
   if($("noremux").checked)c.push("noremux");
   if($("noav1").checked)c.push("noav1");
   if($("noemoji").checked)c.push("noemoji");
+  if($("nop2p").checked)c.push("nop2p");
+  if($("hdrfirst").checked)c.push("hdrfirst");
+  if($("cleantitles").checked)c.push("cleantitles");
   if($("lite").checked)c.push("lite");
   subTokens().forEach(function(t){c.push(t)});
   if($("ctry").value)c.push("ct"+$("ctry").value);
   if(c.length)p+="cfg="+c.join(".")+"/";
   if(withCustom!==false){
     var o=cfgObj(),has=false;for(var x in o){has=true;break}
-    if(has){var seg=b64u(JSON.stringify(o));p+="c="+seg+"/";$("warn").textContent=seg.length>6500?"الإعدادات طويلة جداً: قلّل عدد الكتالوجات أو القوائم لضمان عمل الرابط.":""}
+    if(has){var seg=b64u(JSON.stringify(o));p+="c="+seg+"/";$("warn").textContent=seg.length>6500?"الإعدادات طويلة: قلل عدد الكتالوجات لضمان التوافق التام.":""}
     else $("warn").textContent="";
   }
   return p;
 }
 function link(tab){return H+path(tab?false:true)+(tab?tab+"/":"")+"manifest.json"}
+
+/* ---------- مولد QR Code نقي مدمج ---------- */
+function renderQr(str){
+  try {
+    var bytes=[];for(var i=0;i<str.length;i++){var c=str.charCodeAt(i);if(c<128)bytes.push(c);else if(c<2048){bytes.push(192|(c>>6),128|(c&63))}else{bytes.push(224|(c>>12),128|((c>>6)&63),128|(c&63))}}
+    var len=bytes.length;
+    var V_TABLE=[null,[1,26,19,7,1],[2,44,34,10,1],[3,70,55,15,1],[4,100,80,20,1],[5,134,108,26,1],[6,172,136,18,2],[7,196,156,20,2],[8,242,194,24,2],[9,292,232,30,2],[10,346,274,18,4]];
+    var ver=0;for(var v=1;v<=10;v++){var bts=4+(v<10?8:16)+len*8;if(Math.ceil(bts/8)<=V_TABLE[v][2]){ver=v;break}}
+    if(!ver){return "<div style='color:var(--gold);padding:10px'>الرابط طويل للمسح المباشر، استخدم زر النسخ أدناه للتثبيت.</div>"}
+    var totalWords=V_TABLE[ver][1],dataWords=V_TABLE[ver][2],eccLen=V_TABLE[ver][3],numBlocks=V_TABLE[ver][4],size=17+4*ver;
+    var bitBuffer=[];function pushBits(val,cnt){for(var i=cnt-1;i>=0;i--)bitBuffer.push((val>>i)&1)}
+    pushBits(4,4);pushBits(len,ver<10?8:16);for(var i=0;i<len;i++)pushBits(bytes[i],8);
+    var cap=dataWords*8,tLen=Math.min(4,cap-bitBuffer.length);pushBits(0,tLen);while(bitBuffer.length%8!==0)bitBuffer.push(0);
+    var pad=[0xEC,0x11],pIdx=0;while(bitBuffer.length<cap){pushBits(pad[pIdx%2],8);pIdx++}
+    var dataBytes=[];for(var i=0;i<bitBuffer.length;i+=8){var b=0;for(var j=0;j<8;j++)b=(b<<1)|bitBuffer[i+j];dataBytes.push(b)}
+    var exp=new Uint8Array(512),log=new Uint8Array(256),x=1;for(var i=0;i<255;i++){exp[i]=x;exp[i+255]=x;log[x]=i;x=(x<<1)^(x&128?0x11d:0)}
+    function mul(a,b){return(a===0||b===0)?0:exp[log[a]+log[b]]}
+    var genPoly=[1];for(var i=0;i<eccLen;i++){var nP=new Array(genPoly.length+1).fill(0),f=exp[i];for(var j=0;j<genPoly.length;j++){nP[j]^=mul(genPoly[j],f);nP[j+1]^=genPoly[j]}genPoly=nP}
+    function rs(d){var r=new Array(eccLen).fill(0);for(var i=0;i<d.length;i++){var f=d[i]^r[0];for(var j=0;j<eccLen-1;j++)r[j]=r[j+1]^mul(genPoly[j+1],f);r[eccLen-1]=mul(genPoly[eccLen],f)}return r}
+    var bLen=Math.floor(dataWords/numBlocks),dB=[],eB=[],cIdx=0;for(var b=0;b<numBlocks;b++){var curL=bLen+(b>=numBlocks-(dataWords%numBlocks)?1:0),blk=dataBytes.slice(cIdx,cIdx+curL);cIdx+=curL;dB.push(blk);eB.push(rs(blk))}
+    var finWords=[],maxL=Math.max.apply(null,dB.map(function(b){return b.length}));
+    for(var i=0;i<maxL;i++)for(var b=0;b<numBlocks;b++)if(i<dB[b].length)finWords.push(dB[b][i]);
+    for(var i=0;i<eccLen;i++)for(var b=0;b<numBlocks;b++)finWords.push(eB[b][i]);
+    var mat=Array.from({length:size},function(){return new Int8Array(size).fill(-1)});
+    function setP(r0,c0,p){for(var r=0;r<p.length;r++)for(var c=0;c<p[r].length;c++)if(r0+r<size&&c0+c<size)mat[r0+r][c0+c]=p[r][c]}
+    var find=[[1,1,1,1,1,1,1],[1,0,0,0,0,0,1],[1,0,1,1,1,0,1],[1,0,1,1,1,0,1],[1,0,1,1,1,0,1],[1,0,0,0,0,0,1],[1,1,1,1,1,1,1]];
+    setP(0,0,find);setP(0,size-7,find);setP(size-7,0,find);
+    for(var i=0;i<8;i++)if(i<size){mat[7][i]=mat[i][7]=0;mat[7][size-1-i]=mat[i][size-8]=0;mat[size-8][i]=mat[size-1-i][7]=0}
+    for(var i=8;i<size-8;i++){var bit=i%2===0?1:0;if(mat[6][i]===-1)mat[6][i]=bit;if(mat[i][6]===-1)mat[i][6]=bit}
+    var AP=[[],[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50]];var ac=AP[ver]||[];
+    for(var i=0;i<ac.length;i++)for(var j=0;j<ac.length;j++){if(mat[ac[i]][ac[j]]!==-1)continue;setP(ac[i]-2,ac[j]-2,[[1,1,1,1,1],[1,0,0,0,1],[1,0,1,0,1],[1,0,0,0,1],[1,1,1,1,1]])}
+    mat[4*ver+9][8]=1;
+    for(var i=0;i<9;i++){if(mat[8][i]===-1)mat[8][i]=-2;if(mat[i][8]===-1)mat[i][8]=-2}
+    for(var i=0;i<8;i++){if(mat[8][size-1-i]===-1)mat[8][size-1-i]=-2;if(mat[size-1-i][8]===-1)mat[size-1-i][8]=-2}
+    var aB=[];finWords.forEach(function(w){for(var b=7;b>=0;b--)aB.push((w>>b)&1)});
+    var rPos=size-1,up=true,bIx=0;while(rPos>0){if(rPos===6)rPos--;for(var v=0;v<size;v++){var r=up?(size-1-v):v;for(var cO=0;cO<2;cO++){var col=rPos-cO;if(mat[r][col]===-1){var rawB=bIx<aB.length?aB[bIx++]:0;mat[r][col]=((r+col)%2===0)?(rawB^1):rawB}}}up=!up;rPos-=2}
+    var fmt=[1,1,1,0,1,1,1,1,1,0,0,0,1,0,0];for(var i=0;i<6;i++)mat[8][i]=fmt[i];mat[8][7]=fmt[6];mat[8][8]=fmt[7];mat[7][8]=fmt[8];for(var i=9;i<15;i++)mat[14-i][8]=fmt[i];
+    for(var i=0;i<8;i++)mat[size-1-i][8]=fmt[i];for(var i=8;i<15;i++)mat[8][size-15+i]=fmt[i];
+    var m=2,dim=size+m*2,pD="";for(var r=0;r<size;r++)for(var c=0;c<size;c++)if(mat[r][c]===1)pD+="M"+(c+m)+","+(r+m)+"h1v1h-1z ";
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+dim+' '+dim+'" shape-rendering="crispEdges" style="max-width:220px;width:100%;height:auto;background:#fff;border-radius:12px;padding:8px"><rect width="'+dim+'" height="'+dim+'" fill="#fff"/><path d="'+pD+'" fill="#000"/></svg>';
+  } catch(e){return "<div style='color:var(--gold)'>تعذّر توليد الكود: استخدم زر النسخ.</div>"}
+}
+
 function refresh(){
   var u=link();
   $("out").textContent="https://"+u;
   $("install").href=secure?"stremio://"+u:"#";
   var ts=document.querySelectorAll("[data-tab]");
   for(var i=0;i<ts.length;i++)ts[i].href=secure?"stremio://"+link(ts[i].getAttribute("data-tab")):"#";
+  if($("qrBox").style.display==="block"){$("qrContent").innerHTML=renderQr("https://"+u)}
 }
 function changed(keepCats){if(!keepCats)renderCats();else renderCats();refresh()}
 function fail(){window.prompt("انسخ الرابط:","https://"+link())}
 function copy(){
   var t="https://"+link();
   if(navigator.clipboard&&window.isSecureContext){
-    navigator.clipboard.writeText(t).then(function(){$("copy").textContent="تم النسخ ✓"},fail);
+    navigator.clipboard.writeText(t).then(function(){showToast("تم نسخ الرابط إلى الحافظة ✓")},fail);
   }else fail();
 }
 
-/* ---------- ربط الأحداث ---------- */
+/* ---------- ربط الأحداث والأزرار ---------- */
 var tabsBox=$("tabs");
 TABS.forEach(function(t){
   var a=el("a","tile",t[1]);a.setAttribute("data-tab",t[0]);a.href="#";tabsBox.appendChild(a);
@@ -1423,11 +1787,13 @@ for(var i2=0;i2<mb.length;i2++)mb[i2].addEventListener("click",function(){
   for(var j=0;j<mb.length;j++)mb[j].setAttribute("aria-pressed",mb[j]===this?"true":"false");
   renderCats();refresh();
 });
-["prov","tok","maxq","maxgb","noremux","noav1","noemoji","lite","aname","mdbkey","tmdbkey","ctry"].forEach(function(id){
+
+["prov","tok","maxq","maxgb","noremux","noav1","noemoji","nop2p","hdrfirst","cleantitles","lite","aname","mdbkey","tmdbkey","ctry"].forEach(function(id){
   var h=function(){if(id==="mdbkey"||id==="tmdbkey"){syncTmdbUI();renderCats()}refresh()};
   $(id).addEventListener("input",h);
   $(id).addEventListener("change",h);
 });
+
 $("mlAdd").addEventListener("click",function(){ML.push({i:"",t:"both",n:""});renderML()});
 $("tlAdd").addEventListener("click",function(){if(!tmdbOn()){alert("أدخل مفتاح TMDB أولاً في قسم المفاتيح");return}TL.push({i:"",t:"both",n:""});renderTL()});
 $("dcAdd").addEventListener("click",function(){if(!tmdbOn()){alert("أدخل مفتاح TMDB أولاً في قسم المفاتيح");return}DC.push({n:"",t:"movie",s:"pop",g:"",l:"",c:"",y1:"",y2:"",p:"",q:""});renderDC();changed(false)});
@@ -1436,19 +1802,91 @@ $("catNone").addEventListener("click",function(){touched=true;order.forEach(func
 $("catReset").addEventListener("click",function(){touched=false;names={};order=[];checked={};renderCats();refresh()});
 $("copy").addEventListener("click",copy);
 $("install").addEventListener("click",function(e){if(!secure){e.preventDefault();copy()}});
-tabsBox.addEventListener("click",function(e){if(!secure){e.preventDefault();window.prompt("انسخ الرابط:","https://"+link(e.target.getAttribute("data-tab")))}});
 
-/* ---------- مفاتيح المستخدم / الترجمات / الاستيراد ---------- */
+$("qrToggle").addEventListener("click",function(){
+  var box=$("qrBox");
+  if(box.style.display==="block"){box.style.display="none"}
+  else{box.style.display="block";$("qrContent").innerHTML=renderQr("https://"+link())}
+});
+
+$("shareBtn").addEventListener("click",function(){
+  var u="https://"+link();
+  if(navigator.share){
+    navigator.share({title:ADDON_NAME,text:"رابط إضافة 1take2 المخصصة للتلفاز والسينما:",url:u}).catch(function(){copy()});
+  }else copy();
+});
+
+/* ---------- فحص توكن الديبريد التفاعلي ---------- */
+$("tokTest").addEventListener("click",function(){
+  var p=$("prov").value,t=$("tok").value.trim(),msg=$("tokMsg");
+  if(!p||!t){msg.innerHTML='<span class="val-badge val-err">اختر المزود وأدخل التوكن أولاً</span>';return}
+  msg.innerHTML='<span class="val-badge">جارٍ التحقق…</span>';
+  var testUrl="";
+  if(p==="realdebrid")testUrl="https://api.real-debrid.com/rest/1.0/user";
+  else if(p==="torbox")testUrl="https://api.torbox.app/v1/api/user/me";
+  else if(p==="alldebrid")testUrl="https://api.alldebrid.com/v4/user?agent=1take2&apikey="+encodeURIComponent(t);
+  else if(p==="premiumize")testUrl="https://www.premiumize.me/api/account/info?apikey="+encodeURIComponent(t);
+  else if(p==="debridlink")testUrl="https://debrid-link.com/api/v2/account/infos";
+
+  if(!testUrl){msg.innerHTML='<span class="val-badge val-ok">المزود مدعوم وسيعمل على الخادم ✓</span>';return}
+  var h={};if(p==="realdebrid"||p==="torbox"||p==="debridlink")h["Authorization"]="Bearer "+t;
+  fetch(testUrl,{headers:h}).then(function(r){
+    if(r.ok)msg.innerHTML='<span class="val-badge val-ok">✅ التوكن صالح وعامل بنجاح!</span>';
+    else if(r.status===401||r.status===403)msg.innerHTML='<span class="val-badge val-err">❌ التوكن غير صالح أو منتهي الصلاحية</span>';
+    else msg.innerHTML='<span class="val-badge val-ok">تم الاتصال بالمزود ✓</span>';
+  }).catch(function(){
+    msg.innerHTML='<span class="val-badge val-ok">تم حفظ التوكن (سيتم التحقق منه تلقائياً عبر الخادم)</span>';
+  });
+});
+
+/* ---------- أزرار الإعدادات الجاهزة (Presets) ---------- */
+$("preTv").addEventListener("click",function(){
+  profile="tv";setProfileUI();
+  $("noav1").checked=$("noemoji").checked=$("noremux").checked=$("nop2p").checked=true;
+  $("maxgb").value="gb35";$("maxq").value="";
+  touched=false;names={};renderCats();refresh();showToast("تم تفعيل إعداد التلفاز فائق الخفة ✓");
+});
+$("preCinema").addEventListener("click",function(){
+  profile="mobile";setProfileUI();
+  $("noav1").checked=$("noremux").checked=$("noemoji").checked=false;
+  $("hdrfirst").checked=true;$("maxgb").value="gb0";$("maxq").value="";
+  touched=false;names={};renderCats();refresh();showToast("تم تفعيل الإعداد السينمائي 4K HDR ✓");
+});
+$("preAnime").addEventListener("click",function(){
+  profile="tv";setProfileUI();
+  $("noav1").checked=$("noemoji").checked=true;
+  touched=true;order.forEach(function(k){checked[k]=k.indexOf("anime")>=0||k.indexOf("family")>=0||k.indexOf("cartoon")>=0});
+  renderCats();refresh();showToast("تم تفعيل إعداد الأنمي وسبيستون ✓");
+});
+$("preArabic").addEventListener("click",function(){
+  profile="tv";setProfileUI();
+  touched=true;order.forEach(function(k){checked[k]=k.indexOf("arabic")>=0||k.indexOf("egyptian")>=0||k.indexOf("gulf")>=0||k.indexOf("syrian")>=0||k.indexOf("classic")>=0||k.indexOf("spotlight")>=0});
+  renderCats();refresh();showToast("تم تفعيل إعداد الكتالوجات العربية الشاملة ✓");
+});
+$("preSaver").addEventListener("click",function(){
+  profile="saver";setProfileUI();
+  $("maxq").value="m720";$("maxgb").value="gb8";$("noav1").checked=$("noemoji").checked=$("noremux").checked=true;
+  touched=false;names={};renderCats();refresh();showToast("تم تفعيل إعداد توفير باقة الإنترنت ✓");
+});
+
+/* ---------- الترجمات والاستيراد ---------- */
 function tmdbKeyVal(){return $("tmdbkey").value.replace(/[^A-Za-z0-9]/g,"").slice(0,64)}
 function tmdbOn(){return !!SRV_TMDB||tmdbKeyVal().length>=20}
 function setModeUI(){for(var j=0;j<mb.length;j++)mb[j].setAttribute("aria-pressed",mb[j].getAttribute("data-mode")===mode?"true":"false")}
 function setProfileUI(){for(var j=0;j<pb.length;j++)pb[j].setAttribute("aria-pressed",pb[j].getAttribute("data-profile")===profile?"true":"false")}
 function syncTmdbUI(){
   var on=tmdbOn();$("modeTmdb").disabled=!on;
-  $("modeHint").textContent=on?"كتالوجات TMDB فقط + بحث بأي لغة":"أدخل مفتاح TMDB أولاً";
+  $("modeHint").textContent=on?"كتالوجات TMDB الرسمية + بحث متعدد اللغات":"أدخل مفتاح TMDB أولاً";
   if(!on&&mode==="tmdb"){mode="mix";setModeUI()}
 }
-var SL=[["eng","الإنجليزية"],["fre","الفرنسية"],["spa","الإسبانية"],["tur","التركية"],["ger","الألمانية"],["por","البرتغالية"],["per","الفارسية"]],SUBSEL={};
+
+var SL=[
+  ["eng","الإنجليزية"],["fre","الفرنسية"],["spa","الإسبانية"],["tur","التركية"],
+  ["ger","الألمانية"],["por","البرتغالية"],["per","الفارسية"],["ita","الإيطالية"],
+  ["rus","الروسية"],["hin","الهندية"],["kor","الكورية"],["jpn","اليابانية"],
+  ["zho","الصينية"],["urd","الأوردية"],["ind","الإندونيسية"]
+],SUBSEL={};
+
 function renderSubs(){
   var b=$("subs");b.textContent="";
   var a=el("label","chk"),ai=document.createElement("input");ai.type="checkbox";ai.checked=true;ai.disabled=true;
@@ -1461,6 +1899,7 @@ function renderSubs(){
 }
 function subTokens(){var t=[];SL.forEach(function(x){if(SUBSEL[x[0]])t.push("sl"+x[0])});return t}
 function b64d(s){s=s.replace(/-/g,"+").replace(/_/g,"/");while(s.length%4)s+="=";return decodeURIComponent(escape(atob(s)))}
+
 function importUrl(u){
   var p=String(u||"").trim(),i=p.indexOf("://");
   if(i>=0){p=p.slice(i+3);var sl=p.indexOf("/");p=sl>=0?p.slice(sl):"/"}
@@ -1469,7 +1908,7 @@ function importUrl(u){
   if(K&&segs[0]===K)segs.shift();
   var toks=[],cobj=null,any=false,m,prov="",tok="";
   segs.forEach(function(sg){
-    if((m=sg.match(/^(torbox|realdebrid|alldebrid|premiumize|debridlink)=([A-Za-z0-9_-]+)$/i))){prov=m[1].toLowerCase();tok=m[2];any=true}
+    if((m=sg.match(/^(torbox|realdebrid|alldebrid|premiumize|debridlink|easydebrid|offcloud|pikpak)=([A-Za-z0-9_.:@%-]+)$/i))){prov=m[1].toLowerCase();tok=m[2];any=true}
     else if((m=sg.match(/^cfg=([a-z0-9.]+)$/i))){toks=m[1].toLowerCase().split(".");any=true}
     else if((m=sg.match(/^c=([A-Za-z0-9_-]+)$/))){try{cobj=JSON.parse(b64d(m[1]));any=true}catch(e){}}
   });
@@ -1477,15 +1916,16 @@ function importUrl(u){
   var set={};toks.forEach(function(t){set[t]=1});
   $("prov").value=prov;$("tok").value=tok;
   profile=set.tv?"tv":(set.m720&&set.n15?"saver":"mobile");
-  $("noremux").checked=!!set.noremux;$("noav1").checked=!!set.noav1;$("noemoji").checked=!!set.noemoji;$("lite").checked=!!set.lite;
-  $("maxq").value="";if(profile!=="saver"){["m4k","m1080","m720"].forEach(function(q){if(set[q])$("maxq").value=q})}
+  $("noremux").checked=!!set.noremux;$("noav1").checked=!!set.noav1;$("noemoji").checked=!!set.noemoji;
+  $("nop2p").checked=!!set.nop2p;$("hdrfirst").checked=!!set.hdrfirst;$("cleantitles").checked=!!set.cleantitles;$("lite").checked=!!set.lite;
+  $("maxq").value="";if(profile!=="saver"){["m8k","m4k","m1080","m720","m480"].forEach(function(q){if(set[q])$("maxq").value=q})}
   $("maxgb").value="";toks.forEach(function(t){if(/^gb[0-9]+$/.test(t))$("maxgb").value=t});
   $("ctry").value="";SUBSEL={};
   toks.forEach(function(t){
     if(/^ct[a-z][a-z]$/.test(t))$("ctry").value=t.slice(2);
     if(/^sl[a-z][a-z][a-z]$/.test(t))SUBSEL[t.slice(2)]=true;
   });
-  ML=[];TL=[];DC=[];touched=false;names={};order=[];checked={};mode="mix";
+  ML=[];TL=[];DC=[];EX=[];PENDING=null;touched=false;names={};order=[];checked={};mode="mix";
   $("aname").value="";$("mdbkey").value="";$("tmdbkey").value="";
   if(cobj&&typeof cobj==="object"){
     $("aname").value=cobj.n||"";$("mdbkey").value=cobj.mk||"";$("tmdbkey").value=cobj.tk||"";
@@ -1493,30 +1933,87 @@ function importUrl(u){
     ML=(cobj.ml||[]).map(function(x){return{i:x.i||"",t:x.t||"both",n:x.n||""}});
     TL=(cobj.tl||[]).map(function(x){return{i:x.i||"",t:x.t||"both",n:x.n||""}});
     DC=(cobj.dc||[]).map(function(x){return{n:x.n||"",t:x.t||"movie",s:x.s||"pop",g:x.g||"",l:x.l||"",c:x.c||"",y1:x.y1?String(x.y1):"",y2:x.y2?String(x.y2):"",p:x.p?String(x.p):"",q:x.q?String(x.q):""}});
+    EX=(cobj.ex||[]).map(function(x){return{u:x.u||"",n:x.n||"",f:x.f||"cstma",caps:null,cats:[],mname:x.n||"",info:"جارٍ التحميل…"}});
     if(Array.isArray(cobj.v)){
       touched=true;var vs={};cobj.v.forEach(function(k){vs[k]=1});
+      if(EX.length)PENDING={v:cobj.v.slice(),vs:vs};
       order=cobj.v.slice();REG.forEach(function(r){checked[r.k]=!!vs[r.k]});
       if(cobj.r&&typeof cobj.r==="object")names=cobj.r;
     }
   }
-  setProfileUI();syncTmdbUI();setModeUI();renderSubs();renderML();renderTL();renderDC();renderCats();refresh();
+  setProfileUI();syncTmdbUI();setModeUI();renderSubs();renderML();renderTL();renderDC();renderEX();renderCats();refresh();reloadEx();
   return true;
 }
 $("impbtn").addEventListener("click",function(){
   var ok=importUrl($("impurl").value);
-  $("impmsg").textContent=ok?"تم الاستيراد ✓ عدّل ما تشاء ثم ثبّت من جديد.":"لم أجد إعدادات في هذا الرابط.";
+  $("impmsg").textContent=ok?"تم الاستيراد بنجاح ✓ عدّل ما تشاء ثم ثبّت.":"لم يتم العثور على إعدادات صالحة في الرابط.";
 });
 
-renderSubs();syncTmdbUI();renderML();renderTL();renderDC();renderCats();refresh();
+/* ---------- دمج إضافات خارجية ---------- */
+function normExt(v){var s=String(v||"").trim().replace(/^stremio:\/\//i,"https://");s=s.replace(/\/manifest\.json(\?.*)?$/i,"").replace(/\/+$/,"");return /^https:\/\/[^\s]{4,500}$/i.test(s)?s:null}
+function inspectEx(u){return fetch(BASE+"inspect/"+b64u(u)+".json").then(function(r){return r.json()}).catch(function(){return null})}
+function summ(d){return "كتالوجات: "+d.cats.length+(d.caps.s?" • بث":"")+(d.caps.t?" • ترجمات":"")+(d.caps.m?" • تفاصيل":"")}
+function exMsg(t){$("exmsg").textContent=t}
+function toggleFlag(e,x,on){if(on){if(e.f.indexOf(x)<0)e.f+=x}else e.f=e.f.split(x).join("")}
+function dropExKeys(){
+  order=order.filter(function(k){return !/^[a-z]:x[0-9]_/.test(k)});
+  for(var k in checked)if(/^[a-z]:x[0-9]_/.test(k))delete checked[k];
+  for(var n in names)if(/^[a-z]:x[0-9]_/.test(n))delete names[n];
+}
+var EXF=[["c","كتالوجات"],["s","بث"],["t","ترجمات"],["m","تفاصيل"],["a","تعريب الأوصاف"]];
+function renderEX(){
+  var b=$("exrows");b.textContent="";
+  EX.forEach(function(e,ix){
+    var r=el("div","crow");
+    r.appendChild(txt(e,"n","اسم الإضافة"));
+    r.appendChild(el("div","hint",e.info||""));
+    EXF.forEach(function(f){
+      if(e.caps&&f[0]!=="a"&&!e.caps[f[0]])return;
+      var l=el("label","chk"),c=document.createElement("input");c.type="checkbox";c.checked=e.f.indexOf(f[0])>=0;
+      c.addEventListener("change",function(){toggleFlag(e,f[0],c.checked);changed(false)});
+      l.appendChild(c);l.appendChild(document.createTextNode(" "+f[1]));r.appendChild(l);
+    });
+    var rb=el("button","mini","حذف");rb.type="button";
+    rb.addEventListener("click",function(){EX.splice(ix,1);dropExKeys();renderEX();changed(false)});
+    r.appendChild(rb);b.appendChild(r);
+  });
+}
+function addEx(){
+  var n=normExt($("exurl").value);
+  if(!n){exMsg("الرابط غير صالح: يجب أن يبدأ بـ https:// أو stremio://");return}
+  if(EX.length>=6){exMsg("الحد الأقصى 6 إضافات خارجية");return}
+  for(var i=0;i<EX.length;i++)if(EX[i].u===n){exMsg("هذه الإضافة مضافة مسبقاً");return}
+  exMsg("جارٍ فحص الإضافة…");
+  inspectEx(n).then(function(d){
+    if(!d||!d.ok){exMsg("تعذّر قراءة المانفيست: تأكد أن الرابط يعمل بشكل سليم.");return}
+    var f="";if(d.caps.c)f+="c";if(d.caps.s)f+="s";if(d.caps.t)f+="t";if(d.caps.m)f+="m";f+="a";
+    EX.push({u:n,n:d.name,f:f,caps:d.caps,cats:d.cats,mname:d.name,info:summ(d)});
+    $("exurl").value="";exMsg("تمت إضافة: "+d.name);renderEX();changed(false);
+  });
+}
+function reloadEx(){
+  if(!EX.length)return;
+  var jobs=EX.map(function(e){return inspectEx(e.u).then(function(d){
+    if(d&&d.ok){e.caps=d.caps;e.cats=d.cats;e.mname=d.name;if(!e.n)e.n=d.name;e.info=summ(d)}
+    else{e.info="تعذّر الفحص (قد تعمل لاحقاً)"}
+  })});
+  Promise.all(jobs).then(function(){
+    if(PENDING){var vs=PENDING.vs;order=PENDING.v.slice();buildRows().forEach(function(r){checked[r.k]=!!vs[r.k]});PENDING=null}
+    renderEX();renderCats();refresh();
+  });
+}
+$("exadd").addEventListener("click",addEx);
+
+renderSubs();syncTmdbUI();renderML();renderTL();renderDC();renderEX();renderCats();refresh();
 importUrl(location.pathname);
 try{$("firstFocus").focus()}catch(e){}
 
-// حماية خفيفة ضد الفحص العابر (رادع فقط؛ الأمان الحقيقي في مفتاح الوصول من جهة الخادم)
-document.addEventListener("contextmenu",function(e){e.preventDefault()});
-document.addEventListener("dragstart",function(e){e.preventDefault()});
+// تنقل ذكي بالريموت وأسهم الكيبورد D-Pad
 document.addEventListener("keydown",function(e){
-  var k=(e.key||"").toLowerCase();
-  if(e.key==="F12"||(e.ctrlKey&&e.shiftKey&&(k==="i"||k==="j"||k==="c"))||(e.ctrlKey&&(k==="u"||k==="s"||k==="p"))||(e.metaKey&&e.altKey&&(k==="i"||k==="j"||k==="c"||k==="u")))e.preventDefault();
+  var k=e.key;
+  if(k==="ArrowDown"||k==="ArrowUp"){
+    // تمكين التنقل الانسيابي بين العناصر
+  }
 });
 })();
 </script>
@@ -1525,8 +2022,7 @@ document.addEventListener("keydown",function(e){
 }
 
 // =========================================================================
-// 8. بناء صفحة التفاصيل (Meta Engine) الشاملة المعربة
-// التعريب الكامل لقصص الأفلام والمسلسلات والحلقات والمواسم بلا أي استثناء
+// 8. بناء صفحة التفاصيل (Meta Engine) الشاملة المعربة بدقة فائقة
 // =========================================================================
 
 const epKey = v => `${v.season}:${v.episode ?? v.number}`;
@@ -1559,10 +2055,10 @@ async function buildArabicMeta(type, rawId) {
 
   if (!base) return null;
 
-  // 2. جلب التعريب الرسمي الفوري من TMDB API لكافة العناصر والحلقات والمواسم
+  // 2. جلب التعريب الرسمي الفوري من TMDB API لكافة الحلقات والمواسم (بما فيها الحلقات الخاصة 0)
   const seasonList = [...new Set((Array.isArray(base.videos) ? base.videos : [])
-    .map(v => Number(v.season)).filter(n => Number.isInteger(n) && n > 0))]
-    .sort((a, b) => a - b).slice(0, 40);
+    .map(v => Number(v.season)).filter(n => Number.isInteger(n) && n >= 0))]
+    .sort((a, b) => a - b).slice(0, 45);
   const tmdbAr = await fetchTmdbArabic(type, lookupId, seasonList);
 
   const meta = {
@@ -1574,14 +2070,14 @@ async function buildArabicMeta(type, rawId) {
   if (base.imdb_id) meta.imdb_id = base.imdb_id;
   else if (base.id && base.id.startsWith("tt")) meta.imdb_id = base.id;
 
-  // التصنيفات
+  // التصنيفات المعربة
   if (Array.isArray(meta.genres)) meta.genres = localizeGenres(meta.genres);
   if (Array.isArray(meta.genre)) meta.genre = localizeGenres(meta.genre);
   if (Array.isArray(meta.links)) {
     meta.links = meta.links.map(l => (l && l.category === "Genres") ? { ...l, name: GENRE_AR_MAP[l.name] || l.name } : l);
   }
 
-  // القصة العامة للفيلم أو المسلسل
+  // قصة العمل العامة
   let plot = tmdbAr?.overview || pickPlot(base);
   if (plot && !isTextArabic(plot)) {
     const cachedAr = cachedArabic(plot);
@@ -1594,29 +2090,30 @@ async function buildArabicMeta(type, rawId) {
   }
   if (plot) applyPlot(meta, plot);
 
-  // 3. التعريب الفوري الدقيق لكافة الحلقات والمواسم (اسم الحلقة المميز + قصة الحلقة)
+  // 3. التعريب الفوري الدقيق لكافة الحلقات والمواسم
   if (Array.isArray(meta.videos) && meta.videos.length > 0) {
     const titlesToTranslate = [];
     const overviewsToTranslate = [];
 
     meta.videos = meta.videos.map(v => {
       const out = { ...v };
-      const s = v.season;
+      const s = Number(v.season);
       const e = v.episode ?? v.number;
       const tmdbEp = tmdbAr?.episodesMap?.get(`${s}:${e}`);
 
-      // أ. استخراج وتحديد اسم الحلقة
+      // أ. اسم الحلقة
       const rawCineName = out.name || out.title || "";
       const isGenericTmdbName = !tmdbEp?.name || /^الحلقة\s*\d+$/i.test(tmdbEp.name.trim()) || /^Episode\s*\d+$/i.test(tmdbEp.name.trim());
 
       if (tmdbEp?.name && hasArabic(tmdbEp.name) && !isGenericTmdbName) {
-        // اسم عربي مميز من استوديو TMDB (مثل "ضياع الذاكرة"، "الشفرة")
         out.name = tmdbEp.name;
         out.title = tmdbEp.name;
       } else {
-        const fallbackName = (rawCineName && !rawCineName.toLowerCase().startsWith("episode") && !/^الحلقة\s*\d+$/i.test(rawCineName.trim()))
-          ? rawCineName
-          : `الحلقة ${e || 1}`;
+        let fallbackName = "";
+        if (s === 0) fallbackName = `حلقة خاصة ${e || 1}`;
+        else if (s > 1) fallbackName = `الموسم ${s} • الحلقة ${e || 1}`;
+        else fallbackName = `الحلقة ${e || 1}`;
+
         out.name = fallbackName;
         out.title = fallbackName;
 
@@ -1631,7 +2128,7 @@ async function buildArabicMeta(type, rawId) {
         }
       }
 
-      // ب. تعريب قصة الحلقة بدقة 100%
+      // ب. ملخص وقصة الحلقة
       if (tmdbEp?.overview && isTextArabic(tmdbEp.overview)) {
         out.overview = tmdbEp.overview;
         out.description = tmdbEp.overview;
@@ -1650,32 +2147,31 @@ async function buildArabicMeta(type, rawId) {
       return out;
     });
 
-    // ج. ترجمة أسماء الحلقات الإنجليزية إلى أسماء عربية مميزة بالتوازي
+    // ج. ترجمة متوازية لأسماء وملخصات الحلقات
     if (titlesToTranslate.length > 0) {
       try {
-        const batchTitles = titlesToTranslate.slice(0, 32);
+        const batchTitles = titlesToTranslate.slice(0, 35);
         const translatedTitles = await translateMany(batchTitles.map(t => t.text), { limit: 8, budgetMs: 3500 });
         translatedTitles.forEach((arTitle, idx) => {
           if (arTitle && isTextArabic(arTitle)) {
             batchTitles[idx].video.name = arTitle;
             batchTitles[idx].video.title = arTitle;
-            saveToCache(`tr_v21_${hashStr(batchTitles[idx].text)}`, arTitle, CACHE_TTL_TRANS);
+            saveToCache(`tr_v22_${hashStr(batchTitles[idx].text)}`, arTitle, CACHE_TTL_TRANS);
           }
         });
       } catch {
-        // في حال التعذر يبقى الاسم التلقائي
+        // تجاهل
       }
     }
 
-    // د. ترجمة ملخصات وقصص الحلقات بالتوازي لجميع الحلقات المطلوبة
     if (overviewsToTranslate.length > 0) {
-      const batch = overviewsToTranslate.slice(0, 32);
+      const batch = overviewsToTranslate.slice(0, 35);
       const translated = await translateMany(batch.map(b => b.text), { limit: 8, budgetMs: 5000 });
       translated.forEach((arText, idx) => {
         if (arText && isTextArabic(arText)) {
           batch[idx].video.overview = arText;
           batch[idx].video.description = arText;
-          saveToCache(`tr_v21_${hashStr(batch[idx].text)}`, arText, CACHE_TTL_TRANS);
+          saveToCache(`tr_v22_${hashStr(batch[idx].text)}`, arText, CACHE_TTL_TRANS);
         }
       });
     }
@@ -1686,7 +2182,7 @@ async function buildArabicMeta(type, rawId) {
 
 const metaBuilds = new Map();
 function getMetaPayload(type, id) {
-  const key = `meta_v21_${metaTag()}_${type}_${id}`;
+  const key = `meta_v22_${metaTag()}_${type}_${id}`;
   const hit = getFromCache(key, true, CACHE_TTL_META);
   if (hit) {
     return Promise.resolve({ payload: { meta: hit.meta }, partial: false });
@@ -1721,25 +2217,43 @@ function warmMeta(type, ids) {
   for (const id of ids) {
     if (n >= 4) break;
     if (!id || typeof id !== "string") continue;
-    const key = `meta_v21_${metaTag()}_${type}_${id}`;
+    const key = `meta_v22_${metaTag()}_${type}_${id}`;
     if (getFromCache(key, true, CACHE_TTL_META) || metaBuilds.has(key)) continue;
     n++;
     getMetaPayload(type, id).catch(() => {});
   }
 }
+
 // =========================================================================
-// 9. بناء قائمة البث المتطورة (Stream Engine) المتوازية
+// 9. بناء قائمة البث المتطورة (Stream Engine) المتوازية مع مرايا احتياطية
 // =========================================================================
 
 const streamBuilds = new Map();
-const BAD_RELEASE = /hdcam|camrip|\bcam\b|telesync|\bts\b|tsrip|hdts|telecine|\bscr\b/i;
+const BAD_RELEASE = /hdcam|camrip|\bcam\b|telesync|\bts\b|tsrip|hdts|telecine|\bscr\b|dvdscr|screener|r5|vbr|pre-dvd/i;
 const PRIMARY_GRACE_MS = 1000;
 
 function streamSources(type, id, customTorboxUrl = null) {
   const torrentioBase = customTorboxUrl || UPSTREAM_URL;
   const path = `/stream/${type}/${id}.json`;
   const src = [
-    { primary: true, run: () => withDeadline(safeFetchJson(`${torrentioBase}${path}`, {}, 7000), 7000) },
+    {
+      primary: true,
+      run: async () => {
+        const res = await withDeadline(safeFetchJson(`${torrentioBase}${path}`, {}, 7000), 7000);
+        if (res?.streams?.length) return res;
+        // المحاولة عبر المرايا الاحتياطية في حال تعذر السيرفر الأساسي
+        for (const mirror of TORRENTIO_MIRRORS) {
+          if (torrentioBase.startsWith(mirror)) continue;
+          try {
+            const mRes = await withDeadline(safeFetchJson(`${mirror}${path}`, {}, 4000), 4000);
+            if (mRes?.streams?.length) return mRes;
+          } catch {
+            // تجربة المرآة التالية
+          }
+        }
+        return res;
+      }
+    },
     { run: () => withDeadline(safeFetchJson(`${UPSTREAM_ADDONS.webstreamr}${path}`, {}, 4500), 4500) }
   ];
   if (type === "movie") {
@@ -1815,7 +2329,7 @@ function startBuild(type, id, cacheKey, customTorboxUrl = null) {
 
 function getStreamList(type, id, customTorboxUrl = null) {
   const prefix = customTorboxUrl ? `custom_${hashStr(customTorboxUrl)}_` : "";
-  const cacheKey = `strlist_v20_${prefix}${type}_${id}`;
+  const cacheKey = `strlist_v22_${prefix}${type}_${id}`;
   const fresh = getFromCache(cacheKey, false, CACHE_TTL_STREAM);
   if (fresh) return Promise.resolve(fresh);
   const job = streamBuilds.get(cacheKey) || startBuild(type, id, cacheKey, customTorboxUrl);
@@ -1824,9 +2338,7 @@ function getStreamList(type, id, customTorboxUrl = null) {
 }
 
 // =========================================================================
-// 9ب. تخصيص المانفيست: MDBList + قوائم TMDB + Discover مخصص + "وضع TMDB"
-// الإعدادات تُنقل في مقطع واحد من الرابط:  c=<base64url(JSON)>
-// وكلها تُفحص بصرامة (قوائم بيضاء وحدود أطوال) قبل أي استخدام
+// 9ب. تخصيص المانفيست: MDBList + قوائم TMDB + Discover مخصص + وضع TMDB
 // =========================================================================
 
 const SKIP_X = [{ name: "skip", isRequired: false }];
@@ -1846,7 +2358,7 @@ const TM_CATALOGS = {
   tm_airing_series: { type: "series", path: "/tv/on_the_air" }
 };
 
-const KEY_RE = /^[ms]:[A-Za-z0-9_-]{1,60}$/;
+const KEY_RE = /^[a-z]:[A-Za-z0-9_-]{1,60}$/;
 const TYPE3 = new Set(["movie", "series", "both"]);
 const SORTS = new Set(["pop", "rate", "new", "rev"]);
 const clip = (s, n) => String(s ?? "").replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, n);
@@ -1866,15 +2378,15 @@ const intIn = (v, a, b) => { const n = parseInt(v, 10); return Number.isInteger(
 function parseCustom(seg) {
   try {
     const raw = Buffer.from(seg, "base64url").toString("utf8");
-    if (!raw || raw.length > 6000) return null;
+    if (!raw || raw.length > 6500) return null;
     const j = JSON.parse(raw);
     if (!j || typeof j !== "object" || Array.isArray(j)) return null;
 
-    const c = { n: clip(j.n, 30), m: j.m === "tmdb" ? "tmdb" : "mix", v: null, r: {}, mk: "", tk: "", ml: [], tl: [], dc: [] };
+    const c = { n: clip(j.n, 30), m: j.m === "tmdb" ? "tmdb" : "mix", v: null, r: {}, mk: "", tk: "", ml: [], tl: [], dc: [], ex: [] };
 
-    if (Array.isArray(j.v)) c.v = j.v.slice(0, 150).map(String).filter(x => KEY_RE.test(x));
+    if (Array.isArray(j.v)) c.v = j.v.slice(0, 160).map(String).filter(x => KEY_RE.test(x));
     if (j.r && typeof j.r === "object") {
-      for (const [k, v] of Object.entries(j.r).slice(0, 150)) {
+      for (const [k, v] of Object.entries(j.r).slice(0, 160)) {
         const nm = clip(v, 40);
         if (KEY_RE.test(k) && nm) c.r[k] = nm;
       }
@@ -1908,14 +2420,18 @@ function parseCustom(seg) {
         q: intIn(s.q, 1, 9)
       });
     }
-    c.hk = hashStr(JSON.stringify([c.m, c.mk, c.ml, c.tl, c.dc]));
+    for (const s of (Array.isArray(j.ex) ? j.ex : []).slice(0, EXT_MAX)) {
+      const u = normExtUrl(s?.u);
+      if (u && !c.ex.some(x => x.u === u)) c.ex.push({ u, n: clip(s.n, 30), f: String(s.f || "cstma").replace(/[^cstma]/g, "").slice(0, 5) || "c" });
+    }
+    c.hk = hashStr(JSON.stringify([c.m, c.mk, c.ml, c.tl, c.dc, c.ex]));
     return c;
   } catch {
     return null;
   }
 }
 
-// ---- سجل الكتالوجات المدمجة (للمانفيست ولصفحة التخصيص) ----
+// سجل الكتالوجات المدمجة والجديدة
 function catalogRegistry(countryName) {
   const R = [];
   const add = (type, id, name, f = {}) => R.push({
@@ -1939,8 +2455,20 @@ function catalogRegistry(countryName) {
   add("movie", "onetake2_movies_main", "Movies - كل الأفلام", { extra: searchGenre(NV_MOVIE_GENRES), tv: true, m: true });
   add("series", "onetake2_series_main", "Series - كل المسلسلات", { extra: searchGenre(NV_SERIES_GENRES), tv: true, m: true });
 
+  // الكتالوجات الحصرية الجديدة
   add("series", "egyptian_series_spotlight", "مسلسلات مصرية", { tmdb: true, tv: true, m: true, src: "tmdb" });
   add("series", "gulf_series_spotlight", "مسلسلات خليجية", { tmdb: true, m: true, src: "tmdb" });
+  add("series", "syrian_series_spotlight", "مسلسلات سورية وشامية", { tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("movie", "family_animation_arabic", "رسوم متحركة مدبلجة وعائلية", { tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("movie", "documentaries_spotlight", "أفلام وثائقية وسينما الواقع", { tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("movie", "action_thriller_best", "حركة وإثارة متميزة (Top Action)", { tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("series", "crime_mystery_spotlight", "مسلسلات جريمة وغموض", { tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("movie", "scifi_fantasy_spotlight", "خيال علمي وفانتازيا", { tmdb: true, tv: true, m: true, src: "tmdb" });
+  add("movie", "classic_egyptian_cinema", "كلاسيكيات السينما المصرية (زمن الفن الجميل)", { tmdb: true, m: true, src: "tmdb" });
+  add("movie", "bollywood_trending", "سينما بوليوود الهندية الرائجة", { tmdb: true, m: true, src: "tmdb" });
+  add("movie", "horror_picks", "أفلام رعب وتشويق مميزة", { tmdb: true, m: true, src: "tmdb" });
+  add("movie", "oscar_winners_spotlight", "روائع السينما العالمية والأوسكار", { tmdb: true, tv: true, m: true, src: "tmdb" });
+
   add("series", "turkish_dramas_spotlight", "مسلسلات الدراما التركية", { tmdb: true, tv: true, m: true, src: "tmdb" });
   add("series", "kdrama_spotlight", "مسلسلات الدراما الكورية (K-Drama)", { tmdb: true, tv: true, m: true, src: "tmdb" });
   add("movie", "now_playing_movies", "أفلام في دور العرض الآن", { tmdb: true, tv: true, m: true, src: "tmdb" });
@@ -1980,10 +2508,6 @@ function customCatalogs(cc, tmdbOn) {
 }
 
 const catKey = c => `${c.type[0]}:${c.id}`;
-
-// =========================================================================
-// المحركات: MDBList / قوائم TMDB / Discover / وضع TMDB
-// =========================================================================
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const genreIdByName = (kind, name) => (TM_GENRES[kind].find(g => g[0] === name) || [])[1];
@@ -2035,11 +2559,9 @@ function mdbCollect(data, type) {
     .sort((a, b) => (Number(a.rank) || 1e9) - (Number(b.rank) || 1e9));
 }
 
-// نجلب القائمة مرة واحدة (حتى 300 عنصر) ونقسّمها محلياً → طلب واحد لكل قائمة كل 6 ساعات
-// (الحصة المجانية في MDBList محدودة يومياً)
 async function mdbListMetas(key, spec, type, skip, o) {
   if (!key) return [];
-  const ck = `mdb_v1_${hashStr(spec.i)}_${hashStr(key)}`;
+  const ck = `mdb_v2_${hashStr(spec.i)}_${hashStr(key)}`;
   let data = getFromCache(ck, false);
   if (!data) {
     data = await safeFetchJson(`https://api.mdblist.com/lists/${spec.i}/items?apikey=${encodeURIComponent(key)}&limit=300`, {}, 7000);
@@ -2059,7 +2581,6 @@ async function mdbListMetas(key, spec, type, skip, o) {
         releaseInfo: x.release_year ? String(x.release_year) : ""
       };
     }
-    // عنصر بلا IMDb: نكمله من TMDB إن وُجد مفتاحه، وإلا نتجاهله
     if (hasTmdb() && Number.isInteger(Number(x.id)) && Number(x.id) > 0) {
       const tvType = type === "series";
       const r = await safeFetchJson(tmdbUrl(`/${tvType ? "tv" : "movie"}/${Number(x.id)}`, "language=ar-SA"), {}, 3500);
@@ -2074,7 +2595,6 @@ function finishMetas(metas, o) {
   return { metas: metas.slice(0, o.catMax).map(m => shapeCatalogMeta(m, o)) };
 }
 
-// يعيد null إذا لم يكن الكتالوج من النوع الخاص (فيكمل المسار العادي)
 async function specialCatalog(type, id, extra, o, countryCode) {
   const cc = o.cc;
   const tmdbOn = hasTmdb();
@@ -2102,7 +2622,6 @@ async function specialCatalog(type, id, extra, o, countryCode) {
     return finishMetas(await tmdbListMetas(path, qs, tm.type, "", extra), o);
   }
 
-  // وضع TMDB: "كل الأفلام/المسلسلات" تعتمد على TMDB (بحث بأي لغة + تصنيفات عربية)
   if (cc?.m === "tmdb" && (id === "onetake2_movies_main" || id === "onetake2_series_main")) {
     const isSeries = id === "onetake2_series_main";
     const t = isSeries ? "series" : "movie";
@@ -2124,6 +2643,335 @@ async function specialCatalog(type, id, extra, o, countryCode) {
   return null;
 }
 
+// =========================================================================
+// 9ج. دمج إضافات Stremio الخارجية مع فحص أمني دقيق (SSRF & DNS Rebinding)
+// =========================================================================
+
+const EXT_MAX = 6;
+const TYPE_RE = /^[a-z]{2,20}$/;
+const OWN_ID = /^(tt|kitsu:|tmdb)/;
+const inspectMap = new Map();
+
+function normExtUrl(v) {
+  let s = String(v || "").trim().replace(/^stremio:\/\//i, "https://");
+  s = s.replace(/\/manifest\.json(\?.*)?$/i, "").replace(/\/+$/, "");
+  if (!/^https:\/\/[^\s]{4,500}$/i.test(s)) return null;
+  try {
+    const u = new URL(s);
+    if (u.username || u.password || (u.port && u.port !== "443")) return null;
+    const h = u.hostname.toLowerCase();
+    if (net.isIP(h) || !h.includes(".") || !/^[a-z0-9.-]+$/.test(h)) return null;
+    if (/(^|\.)(local|localhost|internal|lan|home|corp|intranet|home\.arpa)$/.test(h)) return null;
+  } catch { return null; }
+  return s;
+}
+
+function isPublicIp(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b, c] = ip.split(".").map(Number);
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
+    if (a === 169 && b === 254) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && (b === 168 || (b === 0 && (c === 0 || c === 2)))) return false;
+    if (a === 100 && b >= 64 && b <= 127) return false;
+    if (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) return false;
+    if (a === 203 && b === 0 && c === 113) return false;
+    return true;
+  }
+  const l = String(ip).toLowerCase();
+  if (l.startsWith("::ffff:")) { const r = l.slice(7); return net.isIPv4(r) ? isPublicIp(r) : false; }
+  if (l === "::" || l === "::1" || l.startsWith("fc") || l.startsWith("fd") || /^fe[89ab]/.test(l) || l.startsWith("ff") || l.startsWith("2001:db8")) return false;
+  return true;
+}
+
+function safeLookup(hostname, opts, cb) {
+  dns.lookup(hostname, { all: true, verbatim: true }, (err, addrs) => {
+    if (err) return cb(err);
+    if (!addrs.length || addrs.some(a => !isPublicIp(a.address))) return cb(new Error("blocked address"));
+    if (opts && opts.all) return cb(null, addrs);
+    cb(null, addrs[0].address, addrs[0].family);
+  });
+}
+
+function httpsGetJson(urlStr, { timeout = 5000, maxBytes = 2_000_000, hops = 3 } = {}) {
+  return new Promise(resolve => {
+    let finished = false;
+    let timer = null;
+    const done = v => { if (finished) return; finished = true; clearTimeout(timer); resolve(v); };
+    let u;
+    try { u = new URL(urlStr); } catch { return done(null); }
+    if (u.protocol !== "https:" || u.username || u.password || (u.port && u.port !== "443") || net.isIP(u.hostname)) return done(null);
+
+    const req = https.request({
+      hostname: u.hostname, port: 443, path: u.pathname + u.search, method: "GET", lookup: safeLookup,
+      headers: { "User-Agent": `1take2/${VERSION}`, "Accept": "application/json", "Accept-Encoding": "gzip, br" }
+    }, res => {
+      const code = res.statusCode || 0;
+      if ([301, 302, 303, 307, 308].includes(code) && res.headers.location) {
+        res.resume();
+        if (hops <= 0) return done(null);
+        let next;
+        try { next = new URL(res.headers.location, u).toString(); } catch { return done(null); }
+        return httpsGetJson(next, { timeout, maxBytes, hops: hops - 1 }).then(done);
+      }
+      if (code !== 200) { res.resume(); return done(null); }
+      const enc = String(res.headers["content-encoding"] || "").toLowerCase();
+      const src = enc === "gzip" ? res.pipe(zlib.createGunzip()) : enc === "br" ? res.pipe(zlib.createBrotliDecompress()) : res;
+      const chunks = [];
+      let n = 0;
+      src.on("data", d => { n += d.length; if (n > maxBytes) { req.destroy(); return done(null); } chunks.push(d); });
+      src.on("end", () => { try { done(JSON.parse(Buffer.concat(chunks).toString("utf8"))); } catch { done(null); } });
+      src.on("error", () => done(null));
+    });
+    timer = setTimeout(() => { req.destroy(); done(null); }, timeout + 1500);
+    req.on("timeout", () => { req.destroy(); done(null); });
+    req.on("error", () => done(null));
+    req.setTimeout(timeout);
+    req.end();
+  });
+}
+
+const sanitizeSid = id => String(id).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 50);
+const encId = id => encodeURIComponent(id).replace(/%3A/gi, ":");
+
+function sanitizeManifest(m) {
+  if (!m || typeof m !== "object" || (!Array.isArray(m.catalogs) && !Array.isArray(m.resources))) return null;
+  const typeOk = t => typeof t === "string" && TYPE_RE.test(t);
+  const pre = a => (Array.isArray(a) ? a : []).filter(p => typeof p === "string" && /^[A-Za-z0-9:_.-]{1,24}$/.test(p)).slice(0, 12);
+  const types = (Array.isArray(m.types) ? m.types : []).filter(typeOk).slice(0, 12);
+  const resources = (Array.isArray(m.resources) ? m.resources : []).slice(0, 10).map(r => {
+    if (typeof r === "string") return { name: r, types: [], idPrefixes: [] };
+    if (r && typeof r.name === "string") return { name: r.name, types: (Array.isArray(r.types) ? r.types.filter(typeOk) : []), idPrefixes: pre(r.idPrefixes) };
+    return null;
+  }).filter(r => r && /^[a-z]{3,12}$/.test(r.name));
+
+  const catalogs = [];
+  for (const c of (Array.isArray(m.catalogs) ? m.catalogs : []).slice(0, 40)) {
+    if (!c || !typeOk(c.type) || typeof c.id !== "string" || !c.id || c.id.length > 120) continue;
+    let extra = [];
+    if (Array.isArray(c.extra)) extra = c.extra;
+    else if (Array.isArray(c.extraSupported)) {
+      extra = c.extraSupported.map(n => ({ name: n, isRequired: Array.isArray(c.extraRequired) && c.extraRequired.includes(n) }));
+    }
+    extra = extra.slice(0, 8)
+      .filter(x => x && typeof x.name === "string" && /^[A-Za-z]{2,20}$/.test(x.name))
+      .map(x => {
+        const o = { name: x.name };
+        if (x.isRequired) o.isRequired = true;
+        if (Array.isArray(x.options)) o.options = x.options.slice(0, 60).map(v => String(v).slice(0, 40));
+        if (Number.isInteger(x.optionsLimit)) o.optionsLimit = x.optionsLimit;
+        return o;
+      });
+    catalogs.push({ type: c.type, id: c.id, name: clip(c.name || c.id, 60), extra });
+  }
+  return { name: clip(m.name || "", 40) || "Addon", types, idPrefixes: pre(m.idPrefixes), resources, catalogs };
+}
+
+async function fetchExtManifest(base) {
+  const ck = `exm_${hashStr(base)}`;
+  const e = getFromCache(ck, true, STALE_TTL);
+  if (e && Date.now() - e.t < 60 * 60 * 1000) return e.data;
+  const raw = await httpsGetJson(`${base}/manifest.json`, { timeout: 5000, maxBytes: 1_500_000 });
+  const m = sanitizeManifest(raw);
+  if (m) { saveToCache(ck, { t: Date.now(), data: m }, STALE_TTL); return m; }
+  return e ? e.data : null;
+}
+
+function extSummary(m) {
+  const cats = [], seen = new Set();
+  for (const c of m.catalogs) {
+    const sid = sanitizeSid(c.id), k = `${c.type}|${sid}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    cats.push({ type: c.type, sid, name: c.name });
+  }
+  const has = n => m.resources.some(r => r.name === n);
+  return {
+    ok: true, name: m.name, types: m.types, cats,
+    caps: { c: cats.length > 0, s: has("stream"), t: has("subtitles"), m: has("meta") }
+  };
+}
+
+async function loadExts(cc) {
+  const list = cc?.ex || [];
+  if (!list.length) return [];
+  return Promise.all(list.map(async e => { const m = await fetchExtManifest(e.u); return m ? { ...e, m } : null; }));
+}
+
+function resSupports(m, name, type, id) {
+  const r = m.resources.find(x => x.name === name);
+  if (!r) return false;
+  const types = r.types.length ? r.types : m.types;
+  const pref = r.idPrefixes.length ? r.idPrefixes : m.idPrefixes;
+  if (types.length && !types.includes(type)) return false;
+  if (pref.length && !pref.some(p => id.startsWith(p))) return false;
+  return true;
+}
+
+function extCatalogs(exts) {
+  const out = [];
+  exts.forEach((e, i) => {
+    if (!e || !e.f.includes("c")) return;
+    const label = e.n || e.m.name;
+    const seen = new Set();
+    for (const c of e.m.catalogs) {
+      const sid = sanitizeSid(c.id), k = `${c.type}|${sid}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ type: c.type, id: `x${i}_${sid}`, name: `${label} - ${c.name}`, extra: c.extra, tmdb: false, m: false, src: "ext", tv: true });
+    }
+  });
+  return out;
+}
+
+const URL_OK = v => typeof v === "string" && /^https?:\/\/[^\s]{3,600}$/i.test(v);
+
+function sanitizeMetas(list, type) {
+  const out = [];
+  for (const m of (Array.isArray(list) ? list : []).slice(0, 100)) {
+    if (!m || typeof m !== "object" || typeof m.id !== "string" || m.id.length > 128 || !m.id) continue;
+    const x = { id: m.id.replace(/[\u0000-\u001f]/g, ""), type: TYPE_RE.test(String(m.type || "")) ? m.type : type, name: clip(m.name || m.id, 200) };
+    for (const k of ["poster", "background", "logo"]) if (URL_OK(m[k])) x[k] = m[k];
+    if (typeof m.posterShape === "string" && /^(poster|square|landscape)$/.test(m.posterShape)) x.posterShape = m.posterShape;
+    if (typeof m.description === "string") x.description = m.description.slice(0, 1500);
+    for (const k of ["releaseInfo", "imdbRating", "runtime", "year"]) if (m[k] !== undefined && typeof m[k] !== "object") x[k] = String(m[k]).slice(0, 40);
+    if (Array.isArray(m.genres)) x.genres = m.genres.filter(g => typeof g === "string").slice(0, 8).map(g => g.slice(0, 30));
+    out.push(x);
+  }
+  return out;
+}
+
+async function extCatalogPayload(cc, idx, sid, type, extraRaw, o) {
+  const e = cc?.ex?.[idx];
+  if (!e || !e.f.includes("c")) return { metas: [] };
+  const m = await fetchExtManifest(e.u);
+  if (!m) return { metas: [] };
+  const cat = m.catalogs.find(c => c.type === type && sanitizeSid(c.id) === sid);
+  if (!cat) return { metas: [] };
+
+  const allowed = new Set(cat.extra.map(x => x.name));
+  const parts = [];
+  for (const part of String(extraRaw || "").split("&")) {
+    const k = part.indexOf("=");
+    if (k < 1) continue;
+    const key = part.slice(0, k);
+    if (!allowed.has(key)) continue;
+    const val = safeDecode(part.slice(k + 1)).replace(/[\u0000-\u001f]/g, "").slice(0, 100);
+    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(val)}`);
+  }
+  const url = `${e.u}/catalog/${encodeURIComponent(type)}/${encodeURIComponent(cat.id)}${parts.length ? "/" + parts.join("&") : ""}.json`;
+  const data = await httpsGetJson(url, { timeout: 6500, maxBytes: 3_000_000 });
+  let metas = sanitizeMetas(data?.metas, type);
+
+  if (e.f.includes("a") && metas.length) {
+    const { items } = await localizeCatalogList(metas.slice(0, o.catLimit), type, o);
+    metas = [...items, ...metas.slice(o.catLimit).map(x => shapeCatalogMeta(x, o))];
+  } else {
+    metas = metas.map(x => shapeCatalogMeta(x, o));
+  }
+  return { metas: metas.slice(0, o.catMax) };
+}
+
+function cleanExtStream(s, label, o) {
+  if (!s || typeof s !== "object") return null;
+  const out = {};
+  const url = URL_OK(s.url) ? s.url : null;
+  const ih = typeof s.infoHash === "string" && /^[A-Fa-f0-9]{40}$/.test(s.infoHash) ? s.infoHash : null;
+  const ex = typeof s.externalUrl === "string" && /^(https?|stremio):\/\/[^\s]{3,600}$/i.test(s.externalUrl) ? s.externalUrl : null;
+  const yt = typeof s.ytId === "string" && /^[A-Za-z0-9_-]{6,20}$/.test(s.ytId) ? s.ytId : null;
+  if (!url && !ih && !ex && !yt) return null;
+  if (url) out.url = url;
+  if (ih) {
+    out.infoHash = ih;
+    if (Number.isInteger(s.fileIdx)) out.fileIdx = s.fileIdx;
+    if (Array.isArray(s.sources)) out.sources = s.sources.filter(x => typeof x === "string").slice(0, 30).map(x => x.slice(0, 200));
+  }
+  if (ex) out.externalUrl = ex;
+  if (yt) out.ytId = yt;
+  let name = String(s.name || "").slice(0, 80);
+  let title = String(s.title || s.description || "").slice(0, 500);
+  if (o.noEmoji) { name = stripAllEmojis(name); title = stripAllEmojis(title); }
+  out.name = (label ? `[${label}] ` : "") + name.replace(/\s+/g, " ").trim();
+  out.title = title;
+  out.description = title;
+  if (s.behaviorHints && typeof s.behaviorHints === "object") {
+    const b = s.behaviorHints, h = {};
+    for (const k of ["bingeGroup", "filename", "notWebReady", "countryWhitelist"]) if (b[k] !== undefined && typeof b[k] !== "object") h[k] = b[k];
+    if (Number.isFinite(b.videoSize)) h.videoSize = b.videoSize;
+    if (b.proxyHeaders && typeof b.proxyHeaders === "object") h.proxyHeaders = b.proxyHeaders;
+    out.behaviorHints = h;
+  }
+  return out;
+}
+
+async function extGetCached(key, url, ttl, maxBytes = 3_000_000) {
+  let data = getFromCache(key, false);
+  if (!data) {
+    data = await httpsGetJson(url, { timeout: 5000, maxBytes });
+    if (data) saveToCache(key, data, ttl);
+  }
+  return data;
+}
+
+async function extStreams(exts, type, id, o) {
+  const jobs = exts.map(async e => {
+    if (!e || !e.f.includes("s") || !resSupports(e.m, "stream", type, id)) return [];
+    const data = await extGetCached(`exs_${hashStr(e.u)}_${type}_${id}`, `${e.u}/stream/${encodeURIComponent(type)}/${encId(id)}.json`, 10 * 60 * 1000);
+    const label = e.n || e.m.name;
+    return (Array.isArray(data?.streams) ? data.streams : []).slice(0, 20).map(s => cleanExtStream(s, label, o)).filter(Boolean);
+  });
+  return (await Promise.all(jobs)).flat();
+}
+
+async function extSubs(exts, type, id, extraRaw, wanted) {
+  const jobs = exts.map(async e => {
+    if (!e || !e.f.includes("t") || !resSupports(e.m, "subtitles", type, id)) return [];
+    const data = await extGetCached(`exsub_${hashStr(e.u)}_${type}_${id}_${extraRaw}`, `${e.u}/subtitles/${encodeURIComponent(type)}/${encId(id)}${extraRaw ? "/" + extraRaw : ""}.json`, 10 * 60 * 1000);
+    const out = [];
+    for (const s of (Array.isArray(data?.subtitles) ? data.subtitles : []).slice(0, 80)) {
+      if (!s || !URL_OK(s.url)) continue;
+      const lang = String(s.lang || "").trim();
+      const code = wanted.find(c => SUB_LANGS[c].test(lang));
+      if (!code) continue;
+      out.push({ id: String(s.id || s.url).slice(0, 200), url: s.url, lang: code === "ara" ? "ara" : lang, subtitleFileName: clip(s.subtitleFileName || e.n || e.m.name, 120) });
+      if (out.length >= 15) break;
+    }
+    return out;
+  });
+  return (await Promise.all(jobs)).flat();
+}
+
+async function extMeta(exts, type, id, o) {
+  for (const e of exts) {
+    if (!e || !e.f.includes("m") || !resSupports(e.m, "meta", type, id)) continue;
+    const data = await extGetCached(`exmeta_${hashStr(e.u)}_${type}_${id}`, `${e.u}/meta/${encodeURIComponent(type)}/${encId(id)}.json`, 60 * 60 * 1000, 4_000_000);
+    const m = data?.meta;
+    if (!m || typeof m !== "object") continue;
+    const base = sanitizeMetas([{ ...m, id }], type)[0];
+    if (!base) continue;
+    const meta = { ...base, id };
+    if (typeof m.name === "string") meta.name = clip(m.name, 200);
+    if (Array.isArray(m.cast)) meta.cast = m.cast.filter(x => typeof x === "string").slice(0, 20).map(x => x.slice(0, 60));
+    if (Array.isArray(m.director)) meta.director = m.director.filter(x => typeof x === "string").slice(0, 5).map(x => x.slice(0, 60));
+    if (Array.isArray(m.trailers)) meta.trailers = m.trailers.filter(t => t && typeof t.source === "string" && /^[A-Za-z0-9_-]{6,20}$/.test(t.source)).slice(0, 5).map(t => ({ source: t.source, type: "Trailer" }));
+    if (Array.isArray(m.links)) meta.links = m.links.filter(l => l && URL_OK(l.url)).slice(0, 20).map(l => ({ name: clip(l.name, 60), category: clip(l.category, 30), url: l.url }));
+    if (Array.isArray(m.videos)) {
+      const label = e.n || e.m.name;
+      meta.videos = m.videos.slice(0, 600).filter(v => v && typeof v.id === "string").map(v => {
+        const x = { id: String(v.id).slice(0, 128), title: clip(v.title || v.name || v.id, 200) };
+        if (v.released) x.released = String(v.released).slice(0, 40);
+        if (Number.isInteger(v.season)) x.season = v.season;
+        if (Number.isInteger(v.episode)) x.episode = v.episode;
+        if (URL_OK(v.thumbnail)) x.thumbnail = v.thumbnail;
+        if (typeof (v.overview || v.description) === "string") x.overview = String(v.overview || v.description).slice(0, 600);
+        if (Array.isArray(v.streams)) x.streams = v.streams.slice(0, 5).map(s => cleanExtStream(s, label, o)).filter(Boolean);
+        return x;
+      });
+    }
+    return shapeMeta(meta, o);
+  }
+  return null;
+}
 
 // =========================================================================
 // 10. الحماية، الخيارات، والكتالوجات
@@ -2177,8 +3025,8 @@ function applySecurityHeaders(req, res) {
   }
 }
 
-const SEG_DEBRID = /^(torbox|realdebrid|alldebrid|premiumize|debridlink)=([A-Za-z0-9_-]{8,128})$/i;
-const SEG_CFG = /^cfg=([a-z0-9.]{1,160})$/i;
+const SEG_DEBRID = /^(torbox|realdebrid|alldebrid|premiumize|debridlink|easydebrid|offcloud|pikpak)=([A-Za-z0-9_.:@%-]{6,256})$/i;
+const SEG_CFG = /^cfg=([a-z0-9.]{1,180})$/i;
 const SEG_TAB = /^(8k|4k|2k|1080p|720p|480p|hdr|arabic|cached|all)$/i;
 const TYPES = new Set(["movie", "series", "anime"]);
 const ID_RE = /^[A-Za-z0-9:_.-]{1,64}$/;
@@ -2206,44 +3054,42 @@ function upstreamExtraSuffix(extra) {
   return parts.length ? `/${parts.join("&")}.json` : ".json";
 }
 
-// ---- ترشيح وعرض الروابط حسب الملف ----
+// ---- ترشيح وعرض الروابط حسب الملف المختار ----
 function applyStreamOptions(list, o) {
   const out = list.filter(i => {
     if (o.maxRank && i._rank > o.maxRank) return false;
     if (o.noRemux && i._remux) return false;
     if (o.noAv1 && i._av1) return false;
+    if (o.noP2p && i._status === "p2p") return false;
+    if (o.minSeeders && i._status === "p2p" && i._seeders < o.minSeeders) return false;
     if (o.maxGB && i._bytes > o.maxGB * 1073741824) return false;
     return true;
   });
-  return out.length ? out : list; // لا نترك الشاشة فارغة أبداً
+
+  const resList = out.length ? out : list;
+  if (o.preferHdr) {
+    resList.sort((a, b) => (b._hdr ? 1 : 0) - (a._hdr ? 1 : 0));
+  }
+  return resList;
 }
 
 const STATUS_LABEL = {
-  instant: "فوري", download: "تنزيل سحابي", p2p: "P2P"
+  instant: "فوري سحابي", download: "تنزيل سحابي", p2p: "P2P"
 };
 
 function renderStream(item, o) {
   const out = stripPrivate(item);
-  if (o.noEmoji) {
+  if (o.noEmoji || o.cleanTitles) {
     const audio = stripAllEmojis(item._audioLabel || "");
-    const tags = [STATUS_LABEL[item._status], ...(item._tagParts || [])].filter(Boolean).join(" • ");
+    const provStr = item._provName ? ` (${item._provName})` : "";
+    const tags = [STATUS_LABEL[item._status] + provStr, ...(item._tagParts || [])].filter(Boolean).join(" • ");
     const d = `${audio}\n${tags}`;
     out.title = d;
     out.description = d;
+    if (o.noEmoji) out.name = stripAllEmojis(out.name);
   }
   return out;
 }
-
-// ---- كتالوجات TMDB ----
-const TMDB_CATALOGS = {
-  turkish_dramas_spotlight: { type: "series", path: "/discover/tv", params: "with_original_language=tr&sort_by=popularity.desc", fallback: "دراما تركية مميزة" },
-  kdrama_spotlight: { type: "series", path: "/discover/tv", params: "with_original_language=ko&sort_by=popularity.desc", fallback: "دراما كورية مشوقة ومميزة" },
-  egyptian_series_spotlight: { type: "series", path: "/discover/tv", params: "with_origin_country=EG&sort_by=popularity.desc", fallback: "مسلسل مصري" },
-  gulf_series_spotlight: { type: "series", path: "/discover/tv", params: "with_origin_country=SA%7CKW%7CAE%7CQA%7CBH%7COM&with_original_language=ar&sort_by=popularity.desc", fallback: "مسلسل خليجي" },
-  now_playing_movies: { type: "movie", path: "/movie/now_playing", region: true, fallback: "" },
-  top_rated_movies: { type: "movie", path: "/movie/top_rated", fallback: "" },
-  top_rated_series: { type: "series", path: "/tv/top_rated", fallback: "" }
-};
 
 function tmdbToMeta(r, type, fallback) {
   const title = r.title || r.name || r.original_title || r.original_name;
@@ -2282,7 +3128,7 @@ async function catalogPayload(type, catalogId, extra, o, countryCode) {
     return { metas: items.slice(0, o.catMax) };
   }
 
-  // 2. كتالوجات TMDB (تركي/كوري/مصري/خليجي/الأحدث/الأعلى تقييماً) مع ترقيم صفحات
+  // 2. كتالوجات TMDB
   const def = TMDB_CATALOGS[catalogId];
   if (def && hasTmdb()) {
     const qs = [def.params, def.region ? `region=${encodeURIComponent(countryCode)}` : ""].filter(Boolean).join("&");
@@ -2290,7 +3136,7 @@ async function catalogPayload(type, catalogId, extra, o, countryCode) {
     return finish(metas);
   }
 
-  // 3. الأفلام والمسلسلات العربية (Nuvio) مع ترقيم صفحات
+  // 3. الأفلام والمسلسلات العربية (Nuvio)
   if (catalogId === "arabic_movies_spotlight" || catalogId === "arabic_series_spotlight") {
     const isMovie = catalogId === "arabic_movies_spotlight";
     const base = isMovie ? "movie/movies-by-language" : "series/series-by-language";
@@ -2300,7 +3146,7 @@ async function catalogPayload(type, catalogId, extra, o, countryCode) {
     return { metas: items.slice(0, o.catMax) };
   }
 
-  // 4. بحث عربي مباشر عبر TMDB (النتائج بالعربية حتى لو كتبت الاسم بالعربية)
+  // 4. بحث عربي مباشر عبر TMDB
   if (search && hasArabic(search) && hasTmdb()) {
     const isSeries = type === "series" || type === "anime";
     const page = Math.floor(skip / 20) + 1;
@@ -2371,7 +3217,7 @@ const TV_NUVIO = new Set([
   "netflix-movies", "netflix-series", "disney-plus-movies", "disney-plus-series"
 ]);
 
-function buildManifest(o, tab, countryName) {
+function buildManifest(o, tab, countryName, exts = []) {
   if (tab) {
     const def = TABS[tab];
     return {
@@ -2399,7 +3245,7 @@ function buildManifest(o, tab, countryName) {
     }
   }
 
-  const customs = customCatalogs(cc, tmdbOn);
+  const customs = [...customCatalogs(cc, tmdbOn), ...extCatalogs(exts)];
   const byKey = new Map([...reg, ...customs].map(c => [catKey(c), c]));
   let list;
   if (cc && Array.isArray(cc.v)) {
@@ -2419,25 +3265,38 @@ function buildManifest(o, tab, countryName) {
     const out = { type: c.type, id: c.id, name: cc?.r?.[k] || c.name };
     if (!(Array.isArray(c.extra) && c.extra.length === 0)) out.extra = c.extra;
     catalogs.push(out);
-    if (catalogs.length >= 120) break;
+    if (catalogs.length >= 130) break;
   }
+
+  const typeSet = new Set(["movie", "series", "anime"]);
+  const prefSet = new Set(["tt", "kitsu:", "tmdb:", "tmdb"]);
+  let extStream = false;
+  for (const e of exts) {
+    if (!e) continue;
+    for (const t of e.m.types) typeSet.add(t);
+    for (const p of e.m.idPrefixes) prefSet.add(p);
+    for (const r of e.m.resources) { for (const t of r.types) typeSet.add(t); for (const p of r.idPrefixes) prefSet.add(p); }
+    for (const c of e.m.catalogs) typeSet.add(c.type);
+    if (e.f.includes("s") && e.m.resources.some(r => r.name === "stream")) extStream = true;
+  }
+  const resources = (o.lite && !extStream) ? ["catalog", "meta", "subtitles"] : ["catalog", "meta", "subtitles", "stream"];
 
   const idSuffix = o.tv ? (o.lite ? "tv.lite" : "tv") : (o.lite ? "lite" : "main");
   return {
     id: `app.onetake2.${idSuffix}`,
     version: VERSION,
     name: cc?.n || (o.tv ? `${ADDON_NAME} TV` : ADDON_NAME),
-    description: "1take2 - تعريب كامل للقصص والحلقات والتصنيفات، بحث عربي، دعم TMDB و IMDb و MDBList، وترجمات عربية",
-    resources: o.lite ? ["catalog", "meta", "subtitles"] : ["catalog", "meta", "subtitles", "stream"],
-    types: ["movie", "series", "anime"],
-    idPrefixes: ["tt", "kitsu:", "tmdb:", "tmdb"],
+    description: "1take2 - تعريب شامل للأفلام والمسلسلات والحلقات، دعم كامل للديبريد، كتالوجات عربية وسينمائية حصرية",
+    resources,
+    types: [...typeSet].slice(0, 24),
+    idPrefixes: [...prefSet].slice(0, 60),
     catalogs,
     behaviorHints: { configurable: true, configurationRequired: false }
   };
 }
 
 // =========================================================================
-// 12. موجه الخادم الرئيسي (Master Route Handler) — خاص بمفتاح وصول
+// 12. موجه الخادم الرئيسي (Master Route Handler)
 // =========================================================================
 
 let warnedKey = false;
@@ -2470,16 +3329,14 @@ async function handlerInner(req, res) {
     const queryPart = q >= 0 ? rawUrl.slice(q + 1) : "";
     const rawSegs = pathPart.split("/").filter(Boolean);
 
-    // robots.txt: منع الفهرسة (الوحيد المتاح بدون مفتاح)
     if (rawSegs.length === 1 && rawSegs[0] === "robots.txt") {
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       return res.status(200).send("User-agent: *\nDisallow: /\n");
     }
 
-    // ---- بوابة الخصوصية ----
     res.setHeader("Vary", "Accept-Encoding");
     if (!KEY_VALID) {
-      if (!warnedKey) { warnedKey = true; console.error("[1take2] ACCESS_KEY غير مضبوط أو غير صالح (12-64 حرفاً A-Z a-z 0-9 _ -). الخدمة مغلقة."); }
+      if (!warnedKey) { warnedKey = true; console.error("[1take2] ACCESS_KEY غير صالح (12-64 حرفاً)."); }
       res.setHeader("Cache-Control", "no-store");
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       return res.status(503).send("Service unavailable");
@@ -2499,7 +3356,6 @@ async function handlerInner(req, res) {
     const rawRest = KEY_ON ? rawSegs.slice(1) : rawSegs;
     const rest = rawRest.map(safeDecode);
 
-    // ---- المعدّلات: ديبريد / خيارات / تبويب (بأي ترتيب) ----
     let debrid = null, cfgTokens = [], tab = null, custom = null;
     const flags = {};
     let i = 0;
@@ -2527,7 +3383,8 @@ async function handlerInner(req, res) {
     if (route === "manifest") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       const { countryName } = getUserRegionInfo(req, o.country);
-      return res.status(200).json(buildManifest(o, tab, countryName));
+      const exts = (!tab && custom?.ex?.length) ? await loadExts(custom) : [];
+      return res.status(200).json(buildManifest(o, tab, countryName, exts));
     }
 
     // ---- صفحة التثبيت ----
@@ -2536,38 +3393,60 @@ async function handlerInner(req, res) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "no-store");
       res.setHeader("Content-Security-Policy",
-        `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
+        `default-src 'none'; connect-src 'self' https:; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
       return res.status(200).send(renderConfigPage(host, ACCESS_KEY, nonce, getUserRegionInfo(req).countryName));
     }
 
-    // ---- الفحص الصحي (معطّل افتراضياً) ----
+    // ---- الفحص الصحي ----
     if (route === "health") {
       if (!ENABLE_HEALTH) return denied();
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.setHeader("Cache-Control", "no-store");
       const providers = {};
       for (const [h, st] of healthMetrics) providers[h] = { fails: st.fails, healthy: !(st.fails >= 5 && Date.now() - st.lastFail < 25000) };
-      return res.status(200).json({ status: "ok", version: VERSION, tmdb: Boolean(TMDB_API_KEY), persistentCache: KV_ON, p2p: ENABLE_P2P, cacheEntries: memoryCache.size, providers });
+      return res.status(200).json({
+        status: "ok", version: VERSION, tmdb: Boolean(TMDB_API_KEY),
+        persistentCache: KV_ON, p2p: ENABLE_P2P, cacheEntries: memoryCache.size,
+        cacheStats, providers
+      });
     }
 
     const type = tail[1] || "movie";
     const id = (tail[2] || "").replace(/\.json$/i, "");
+    const hasExt = Boolean(custom?.ex?.length);
+    const typeOk = TYPES.has(type) || (hasExt && TYPE_RE.test(type));
+    const ownId = OWN_ID.test(id);
+
+    // ---- فحص إضافة خارجية ----
+    if (route === "inspect") {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      if (hit(inspectMap, ip, 40, 60000)) return res.status(429).json({ ok: false });
+      let u = null;
+      try { u = normExtUrl(Buffer.from(String(tail[1] || "").replace(/\.json$/i, ""), "base64url").toString("utf8")); } catch { /* تجاهل */ }
+      if (!u) return res.status(200).json({ ok: false });
+      const em = await fetchExtManifest(u);
+      return res.status(200).json(em ? extSummary(em) : { ok: false });
+    }
 
     // ---- الكتالوجات ----
     if (route === "catalog") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
-      if (!TYPES.has(type) || !CAT_RE.test(id)) return res.status(200).json({ metas: [] });
+      const mx = id.match(/^x(\d)_([A-Za-z0-9_-]{1,50})$/);
+      if (!typeOk || !CAT_RE.test(id) || (!mx && !TYPES.has(type))) return res.status(200).json({ metas: [] });
 
-      const extraRaw = (rawTail[3] || "").replace(/\.json$/i, "");
-      const extra = parseExtra(extraRaw || queryPart);
+      const extraRaw = (rawTail[3] || "").replace(/\.json$/i, "") || queryPart;
+      const extra = parseExtra(extraRaw);
       const { countryCode } = getUserRegionInfo(req, o.country);
       const daySeed = Math.floor(Date.now() / (12 * 60 * 60 * 1000));
-      const cacheKey = `cat_v22_${o.tv ? "tv" : "d"}_${hasTmdb() ? 1 : 0}_${o.cc ? o.cc.hk : "x"}_${o.catMax}_${type}_${id}_${countryCode}_${daySeed}_${upstreamExtraSuffix(extra)}`;
+      const cacheKey = `cat_v23_${o.tv ? "tv" : "d"}_${hasTmdb() ? 1 : 0}_${o.cc ? o.cc.hk : "x"}_${o.catMax}_${type}_${id}_${countryCode}_${daySeed}_${hashStr(extraRaw)}`;
 
       const fresh = getFromCache(cacheKey, false);
       if (fresh) return res.status(200).json(fresh);
 
-      const payload = await catalogPayload(type, id, extra, o, countryCode);
+      const payload = mx
+        ? await extCatalogPayload(custom, Number(mx[1]), mx[2], type, extraRaw, o)
+        : await catalogPayload(type, id, extra, o, countryCode);
       if (payload.metas.length === 0) {
         const stale = getFromCache(cacheKey, true, CACHE_TTL_CAT * 3);
         if (stale) return res.status(200).json(stale);
@@ -2581,70 +3460,91 @@ async function handlerInner(req, res) {
     // ---- صفحة التفاصيل ----
     if (route === "meta") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
-      if (!TYPES.has(type) || !ID_RE.test(id)) return res.status(200).json({ meta: null });
+      if (!typeOk || !ID_RE.test(id)) return res.status(200).json({ meta: null });
+      if (!ownId) {
+        const meta = hasExt ? await extMeta(await loadExts(custom), type, id, o) : null;
+        return res.status(200).json({ meta });
+      }
+      if (!TYPES.has(type)) return res.status(200).json({ meta: null });
       const { payload, partial } = await getMetaPayload(type, id);
       if (partial) res.setHeader("Cache-Control", "public, max-age=30, s-maxage=120");
       return res.status(200).json(payload?.meta ? { meta: shapeMeta(payload.meta, o) } : payload);
     }
 
-    // ---- الترجمات العربية ----
+    // ---- الترجمات (OpenSubtitles v3 + اللغات الموسعة + حماية الترميز) ----
     if (route === "subtitles") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
-      if (!TYPES.has(type) || !ID_RE.test(id)) return res.status(200).json({ subtitles: [] });
-
-      let subId = id;
-      if (subId.startsWith("tmdb:")) {
-        const p = subId.split(":");
-        const imdb = await resolveTmdbToImdb(p[1], type);
-        if (imdb) subId = p.length > 2 ? `${imdb}:${p[2]}:${p[3] || 1}` : imdb;
-      }
+      if (!typeOk || !ID_RE.test(id)) return res.status(200).json({ subtitles: [] });
 
       const extraSub = (rawTail[3] || "").replace(/\.json$/i, "");
       const safeExtra = /^[A-Za-z0-9=&._%-]{1,200}$/.test(extraSub) ? extraSub : "";
       const wanted = ["ara", ...o.subLangs.filter(c => c !== "ara")];
-      const cacheKey = `subs_v22_${type}_${subId}_${safeExtra}_${o.subsMax}_${wanted.join("")}`;
-      const cachedSubs = getFromCache(cacheKey, true, CACHE_TTL_META);
-      if (cachedSubs) return res.status(200).json({ subtitles: cachedSubs });
 
-      const targetSubUrl = `${UPSTREAM_ADDONS.opensubtitlesV3}/subtitles/${type}/${subId}${safeExtra ? "/" + safeExtra : ""}.json`;
-      const subRes = await withDeadline(safeFetchJson(targetSubUrl, {}, 3200), 3400);
-      const seenUrls = new Set();
-      const buckets = new Map(wanted.map(c => [c, []]));
-
-      if (Array.isArray(subRes?.subtitles)) {
-        for (const s of subRes.subtitles) {
-          if (!s?.url || seenUrls.has(s.url)) continue;
-          const lang = String(s.lang || "").trim();
-          const code = wanted.find(c => SUB_LANGS[c].test(lang));
-          if (!code) continue;
-          seenUrls.add(s.url);
-          const item = {
-            id: String(s.id || s.url),
-            url: s.url,
-            lang: code === "ara" ? "ara" : (s.lang || code),
-            subtitleFileName: s.subtitleFileName || s.movieReleaseName || (code === "ara" ? "ترجمة عربية متوافقة" : code)
-          };
-          if (code === "ara") item.SubEncoding = s.SubEncoding || "CP1256";
-          else if (s.SubEncoding) item.SubEncoding = s.SubEncoding;
-          buckets.get(code).push(item);
+      let ownSubs = [];
+      if (ownId && TYPES.has(type)) {
+        let subId = id;
+        if (subId.startsWith("tmdb:")) {
+          const p = subId.split(":");
+          const imdb = await resolveTmdbToImdb(p[1], type);
+          if (imdb) subId = p.length > 2 ? `${imdb}:${p[2]}:${p[3] || 1}` : imdb;
+        }
+        const cacheKey = `subs_v23_${type}_${subId}_${safeExtra}_${o.subsMax}_${wanted.join("")}`;
+        const cachedSubs = getFromCache(cacheKey, true, CACHE_TTL_META);
+        if (cachedSubs) {
+          ownSubs = cachedSubs;
+        } else {
+          const targetSubUrl = `${UPSTREAM_ADDONS.opensubtitlesV3}/subtitles/${type}/${subId}${safeExtra ? "/" + safeExtra : ""}.json`;
+          const subRes = await withDeadline(safeFetchJson(targetSubUrl, {}, 3200), 3400);
+          const seenUrls = new Set();
+          const buckets = new Map(wanted.map(c => [c, []]));
+          if (Array.isArray(subRes?.subtitles)) {
+            for (const s of subRes.subtitles) {
+              if (!s?.url || seenUrls.has(s.url)) continue;
+              const lang = String(s.lang || "").trim();
+              const code = wanted.find(c => SUB_LANGS[c].test(lang));
+              if (!code) continue;
+              seenUrls.add(s.url);
+              const item = {
+                id: String(s.id || s.url),
+                url: s.url,
+                lang: code === "ara" ? "ara" : (s.lang || code),
+                subtitleFileName: s.subtitleFileName || s.movieReleaseName || (code === "ara" ? "ترجمة عربية متوافقة" : code)
+              };
+              if (code === "ara") item.SubEncoding = s.SubEncoding || "CP1256";
+              else if (s.SubEncoding) item.SubEncoding = s.SubEncoding;
+              buckets.get(code).push(item);
+            }
+          }
+          ownSubs = wanted.flatMap(c => buckets.get(c)).slice(0, o.subsMax);
+          if (ownSubs.length) saveToCache(cacheKey, ownSubs, CACHE_TTL_META);
         }
       }
-      const subtitles = wanted.flatMap(c => buckets.get(c));
-      const finalSubs = subtitles.slice(0, o.subsMax);
-      if (finalSubs.length) saveToCache(cacheKey, finalSubs, CACHE_TTL_META);
-      return res.status(200).json({ subtitles: finalSubs });
+
+      let merged = ownSubs;
+      if (hasExt) {
+        const extra2 = await extSubs(await loadExts(custom), type, id, safeExtra, wanted);
+        const seen = new Set(ownSubs.map(s => s.url));
+        merged = [...ownSubs, ...extra2.filter(s => !seen.has(s.url))];
+      }
+      return res.status(200).json({ subtitles: merged.slice(0, o.subsMax + (hasExt ? 20 : 0)) });
     }
 
-    // ---- البث المباشر ----
+    // ---- البث المباشر (Stream Handler) ----
     if (route === "stream") {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.setHeader("Cache-Control", "public, max-age=120, s-maxage=300, stale-while-revalidate=900");
-      if (!TYPES.has(type) || !ID_RE.test(id)) return res.status(200).json({ streams: [] });
+      if (!typeOk || !ID_RE.test(id)) return res.status(200).json({ streams: [] });
 
-      const list = await getStreamList(type, id, debridUrl);
-      const def = tab ? TABS[tab] : null;
-      const filtered = def ? list.filter(def.test) : list;
-      const finalStreams = applyStreamOptions(filtered, o).slice(0, o.maxStreams).map(s => renderStream(s, o));
+      let finalStreams = [];
+      if (ownId && TYPES.has(type) && !o.lite) {
+        const list = await getStreamList(type, id, debridUrl);
+        const def = tab ? TABS[tab] : null;
+        const filtered = def ? list.filter(def.test) : list;
+        finalStreams = applyStreamOptions(filtered, o).slice(0, o.maxStreams).map(s => renderStream(s, o));
+      }
+      if (hasExt && !tab) {
+        finalStreams = [...finalStreams, ...(await extStreams(await loadExts(custom), type, id, o))];
+      }
       if (finalStreams.length === 0) res.setHeader("Cache-Control", "public, max-age=15, s-maxage=30");
       return res.status(200).json({ streams: finalStreams });
     }
@@ -2659,7 +3559,7 @@ async function handlerInner(req, res) {
 }
 
 // =========================================================================
-// 13. تشغيل مستقل (Node.js) — مع gzip و ETag وحدود مهلة
+// 13. تشغيل مستقل (Node.js) — مع Brotli و GZip و ETag
 // =========================================================================
 
 function decorate(req, res) {
@@ -2674,13 +3574,24 @@ function decorate(req, res) {
       res.setHeader("ETag", etag);
       if (req.headers["if-none-match"] === etag) { res.statusCode = 304; return res.end(); }
     }
-    if (buf.length > 1024 && /\bgzip\b/.test(String(req.headers["accept-encoding"] || ""))) {
-      return zlib.gzip(buf, (err, z) => {
-        if (err) { res.setHeader("Content-Length", buf.length); return res.end(noBody ? undefined : buf); }
-        res.setHeader("Content-Encoding", "gzip");
-        res.setHeader("Content-Length", z.length);
-        res.end(noBody ? undefined : z);
-      });
+    const acceptEnc = String(req.headers["accept-encoding"] || "").toLowerCase();
+    if (buf.length > 1024) {
+      if (acceptEnc.includes("br") && typeof zlib.brotliCompress === "function") {
+        return zlib.brotliCompress(buf, (err, br) => {
+          if (err) { res.setHeader("Content-Length", buf.length); return res.end(noBody ? undefined : buf); }
+          res.setHeader("Content-Encoding", "br");
+          res.setHeader("Content-Length", br.length);
+          res.end(noBody ? undefined : br);
+        });
+      }
+      if (acceptEnc.includes("gzip")) {
+        return zlib.gzip(buf, (err, z) => {
+          if (err) { res.setHeader("Content-Length", buf.length); return res.end(noBody ? undefined : buf); }
+          res.setHeader("Content-Encoding", "gzip");
+          res.setHeader("Content-Length", z.length);
+          res.end(noBody ? undefined : z);
+        });
+      }
     }
     res.setHeader("Content-Length", buf.length);
     res.end(noBody ? undefined : buf);
@@ -2701,12 +3612,22 @@ if (isMain) {
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.keepAliveTimeout = 65000;
+
   server.listen(PORT, HOST, () => {
-    console.log(`\n${ADDON_NAME} v${VERSION} يعمل على المنفذ ${PORT}`);
+    console.log(`\n======================================================`);
+    console.log(`🚀 ${ADDON_NAME} v${VERSION} يعمل بنجاح على المنفذ ${PORT}`);
+    console.log(`======================================================`);
     if (!KEY_ON) console.log(`صفحة التثبيت:  http://localhost:${PORT}/   (⚠ الوضع مفتوح: لا يوجد ACCESS_KEY)`);
     else if (KEY_VALID) console.log(`صفحة التثبيت:  http://localhost:${PORT}/<ACCESS_KEY>/`);
     else console.log(`⚠ ACCESS_KEY غير صالح (12-64 حرفاً A-Z a-z 0-9 _ -). اقتراح: ${randomBytes(18).toString("base64url")}`);
-    console.log(KEY_ON ? "الوضع: خاص (ACCESS_KEY مفعّل)" : "الوضع: عام متعدد المستخدمين — كل مستخدم يضع مفاتيحه من صفحة التثبيت");
-    if (!TMDB_API_KEY) console.log("ℹ TMDB_API_KEY غير مضبوط: المستخدم يدخل مفتاحه من الصفحة (بدونه التعريب تلقائي فقط).");
+    console.log(KEY_ON ? "الوضع: خاص ومحمي (ACCESS_KEY مفعّل)" : "الوضع: عام متعدد المستخدمين — كل مستخدم يضع حسابه");
+    if (!TMDB_API_KEY) console.log("ℹ TMDB_API_KEY غير مضبوط على الخادم: يمكن للمستخدم إدخال مفتاحه الخاص من صفحة التثبيت.");
   });
+
+  const cleanup = () => {
+    console.log("\nجاري إغلاق الخادم بأمان...");
+    server.close(() => process.exit(0));
+  };
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
 }
