@@ -1,25 +1,21 @@
 // =========================================================================
-// 1take2 v26.0.0 - Grand Imperial Ultimate Edition (النسخة الإمبراطورية الأسطورية)
+// 1take2 v27.0.0 - Ultimate Edition (النسخة المتكاملة الرسمية)
 // تعريب استوديوهات TMDB، ترجمات متزامنة، محرك فك ترميز CP-1256 فوري، دعم متعدد لسيرفرات
 // الدبريد (Real-Debrid, TorBox, AllDebrid, Premiumize) ومجمّع روابط التورنت المتوازي
-// + المنظومة السباعية الكاملة للتقييمات العالمية (IMDb, RT, Metacritic, Letterboxd, Trakt, TMDB)
-// ودعم بوسترات تقييمات RPDB (Rating Poster Database)
+// + تكامل MDBList API الرسمي للتقييمات العالمية (IMDb, RT, Metacritic, Letterboxd, Trakt, TMDB)
 // =========================================================================
 
 /*
- * فهرس التطويرات والتقييمات الشاملة:
+ * فهرس المزايا المتكاملة:
  * -------------------------------------------------------------
- * 1. منظومة التقييمات العالمية السباعية الشاملة:
- *    [79 Ⓜ️ Metacritic] [90% 🍿 RT Popcorn] [96% 🍅 RT Critics] [3.7 🟢 Letterboxd]
- *    [76 🔴 Trakt] [74 🟦 TheMovieDB] [7.5 ⭐ IMDb]
- *    - عرض شريط التقييمات السباعي أعلى قصة العمل المعربة في صفحة التفاصيل.
- *    - إضافة أزرار وشرائح التقييمات التفاعلية في meta.links مباشرة تحت العنوان.
- *    - دعم مفتاح RPDB (Rating Poster Database) لعرض شريط التقييمات على البوسترات مباشرة.
+ * 1. دعم MDBList API الرسمي للتقييمات العالمية المعتمدة:
+ *    [IMDb, Rotten Tomatoes Critics & Audience, Metacritic, Letterboxd, Trakt, TMDB]
+ *    - إضافة أزرار وشرائح التقييمات التفاعلية المباشرة في meta.links.
  * 2. تعريب شامل لكافة قصص وعناوين الحلقات والمواسم بلا نصوص فارغة أو إنجليزية.
  * 3. مصحح ترميز الترجمات الفوري: تحويل CP-1256 إلى UTF-8 نقي عبر مسار /sub-proxy.
  * 4. دعم متزامن لـ TorBox و Real-Debrid و AllDebrid و Premiumize وفاحص المفاتيح الحي.
  * 5. مجمّع التورنت المتوازي مع كشف الدبلجة العربية [🎙️ مدبلج] والترجمة المدمجة [💬 مترجم].
- * 6. 14 كتالوجاً عربياً وعالمياً متخصصاً (سينما، مسلسلات، تركي، كوري، رمضان، أطفال، IMDb 250).
+ * 6. كتالوجات عربية وعالمية متخصصة (سينما، مسلسلات، تركي، كوري، رمضان، أطفال، IMDb 250).
  */
 
 const ADDON_NAME = "1take2";
@@ -1825,7 +1821,7 @@ export default async function handler(req, res) {
       const { countryCode } = getUserRegionInfo(req);
       const daySeed = Math.floor(Date.now() / (1000 * 60 * 60 * 12));
 
-      const cacheKey = `cat_v26_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}_${customRpdbKey || ""}`;
+      const cacheKey = `cat_v27_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
       const cachedCat = getFromCache(cacheKey, true, CACHE_TTL_CAT);
       if (cachedCat) return res.status(200).json(cachedCat);
 
