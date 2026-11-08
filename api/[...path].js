@@ -681,16 +681,18 @@ async function fetchAllRatings(imdbId, tmdbVote = null, tmdbTitle = null) {
 // تنسيق شريط التقييمات السباعي بنفس ترتيب أيقونات الصورة المرفقة
 function formatRatingsBanner(ratings) {
   const parts = [];
-  if (ratings.metacritic) parts.push(`${ratings.metacritic} Ⓜ️`);
-  if (ratings.rtAudience) parts.push(`${ratings.rtAudience} 🍿`);
-  if (ratings.rtCritics) parts.push(`${ratings.rtCritics} 🍅`);
-  if (ratings.letterboxd) parts.push(`${ratings.letterboxd} 🟢`);
-  if (ratings.trakt) parts.push(`${ratings.trakt} 🔴`);
-  if (ratings.tmdb) parts.push(`${ratings.tmdb} 🟦`);
-  if (ratings.imdb) parts.push(`${ratings.imdb} ⭐`);
+  if (ratings.metacritic) parts.push(`[ ${ratings.metacritic} Ⓜ️ ]`);
+  if (ratings.rtAudience) parts.push(`[ ${ratings.rtAudience} 🍿 ]`);
+  if (ratings.rtCritics) parts.push(`[ ${ratings.rtCritics} 🍅 ]`);
+  if (ratings.letterboxd) parts.push(`[ ${ratings.letterboxd} 🟢 ]`);
+  if (ratings.trakt) parts.push(`[ ${ratings.trakt} 🔴 ]`);
+  if (ratings.tmdb) parts.push(`[ ${ratings.tmdb} 🔷 ]`);
+  if (ratings.imdb) parts.push(`[ ${ratings.imdb} ⭐ ]`);
 
   if (parts.length === 0) return "";
-  return `📊 [لوحة التقييمات العالمية]:\n${parts.join("    ")}\n────────────────────────────────────\n`;
+  // شريط تقييمات محمي بالكبسولات وعلامات التوجيه LTR الإجبارية لمنع انعكاس وتداخل الأرقام
+  const ltrLine = `\u202A${parts.join("   ")}\u202C`;
+  return `📊 [لوحة التقييمات العالمية]:\n${ltrLine}\n────────────────────────────────────\n`;
 }
 
 // =========================================================================
@@ -1211,9 +1213,23 @@ function renderConfigPage(host, customPath = "") {
   </div>
 
   <div class="input-box">
-    <label for="rpdbKey">مفتاح RPDB لبوسترات التقييمات (اختياري - لطباعة شريط التقييمات على البوسترات):</label>
-    <div class="input-group">
-      <input type="text" id="rpdbKey" placeholder="الصق مفتاح RatingPosterDB الخاص بك هنا أو اتركه فارغاً" oninput="updateLinks()">
+    <label>خيارات بوسترات التقييمات في القوائم (Rating Posters):</label>
+    <div style="display:flex;flex-direction:column;gap:9px;margin-top:8px;background:#151522;padding:14px;border-radius:14px;border:1px solid var(--card-border)">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13.5px;color:#fff">
+        <input type="radio" name="posterMode" value="free" checked onchange="handlePosterModeChange()">
+        <span>🟢 <b>شريط التقييمات المجاني 100% (Free)</b> — بدون أي مفتاح ولا اشتراك ولا حساب</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13.5px;color:#bbb">
+        <input type="radio" name="posterMode" value="clean" onchange="handlePosterModeChange()">
+        <span>⚪ <b>بوسترات TMDB الأصلية النظيفة</b> — بدون طباعة شريط على الغلاف (التقييمات السباعية تظل معروضة بالكامل في التفاصيل)</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13.5px;color:#bbb">
+        <input type="radio" name="posterMode" value="custom" onchange="handlePosterModeChange()">
+        <span>🟡 <b>مفتاح خاص مخصص (RPDB / OpenPosterDB / AIORatings)</b> — اختياري لمن لديه مفتاح مدفوع أو خاص</span>
+      </label>
+      <div id="customKeyBox" style="display:none;margin-top:6px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
+        <input type="text" id="rpdbKey" style="width:100%;padding:10px 14px;background:#0d0d14;border:1px solid var(--card-border);border-radius:10px;color:#fff;font-size:13px;outline:none" placeholder="الصق مفتاحك المخصص هنا أو اتركه فارغاً" oninput="updateLinks()">
+      </div>
     </div>
   </div>
 
@@ -1249,10 +1265,10 @@ function renderConfigPage(host, customPath = "") {
   <div class="info-box">
     <b>🌟 مزايا منظومة التقييمات السباعية الجديدة:</b>
     <ul class="feature-list">
-      <li>✅ <b>لوحة التقييمات العالمية:</b> إظهار تقييمات (IMDb, Metacritic, RT Critics, RT Audience, Letterboxd, Trakt, TMDB) في بطاقة كل فيلم ومسلسل.</li>
-      <li>✅ <b>دعم RPDB الكامل:</b> إمكانية إظهار شريط التقييمات الرسومي مباشرة على أغلفة وبوسترات الأعمال.</li>
+      <li>✅ <b>لوحة التقييمات العالمية المجانية:</b> إظهار تقييمات (IMDb, Metacritic, RT Critics, RT Audience, Letterboxd, Trakt, TMDB) مجاناً 100% في بطاقة كل فيلم ومسلسل بدون أي اشتراك أو دفع.</li>
+      <li>✅ <b>بوسترات التقييمات المجانية:</b> شريط التقييمات الرسومي متاح مجاناً بنقرة واحدة بدون حساب أو مفتاح، مع دعم المفاتيح المخصصة (RPDB / OpenPosterDB / AIORatings).</li>
       <li>✅ <b>أزرار التقييمات التفاعلية:</b> روابط مباشرة لكل منصة تقييم أسفل العنوان في Stremio.</li>
-      <li>✅ <b>تعريب كامل لقصص الحلقات</b> بدون نصوص إنجليزية أو فراغات.</li>
+      <li>✅ <b>تعريب كامل لقصص الحلقات والمواسم</b> بدون نصوص إنجليزية أو فراغات.</li>
     </ul>
   </div>
 
@@ -1267,20 +1283,33 @@ function getCleanToken() {
   return document.getElementById("debridKey").value.trim().replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
-function getRpdbToken() {
-  return document.getElementById("rpdbKey").value.trim().replace(/[^a-zA-Z0-9_-]/g, "");
+function getPosterOption() {
+  var mode = document.querySelector('input[name="posterMode"]:checked')?.value || "free";
+  if (mode === "free") return "free";
+  if (mode === "custom") {
+    var key = (document.getElementById("rpdbKey")?.value || "").trim().replace(/[^a-zA-Z0-9_-]/g, "");
+    return key || "";
+  }
+  return "";
+}
+
+function handlePosterModeChange() {
+  var mode = document.querySelector('input[name="posterMode"]:checked')?.value || "free";
+  var box = document.getElementById("customKeyBox");
+  if (box) box.style.display = (mode === "custom") ? "block" : "none";
+  updateLinks();
 }
 
 function getServicePrefix() {
   var t = getCleanToken();
-  var rpdb = getRpdbToken();
+  var posterOpt = getPosterOption();
   var p = "";
   if (t) {
     var s = document.getElementById("debridService").value;
     p += s + "=" + t + "/";
   }
-  if (rpdb) {
-    p += "rpdbkey=" + rpdb + "/";
+  if (posterOpt) {
+    p += "rpdbkey=" + posterOpt + "/";
   }
   return p;
 }
@@ -1400,9 +1429,10 @@ async function buildArabicMeta(type, rawId, rpdbKey = null) {
 
   const targetImdbId = meta.imdb_id || (meta.id && meta.id.startsWith("tt") ? meta.id : null);
 
-  // دعم بوستر RPDB عند تفعيل المفتاح
-  if (rpdbKey && targetImdbId) {
-    meta.poster = `https://api.ratingposterdb.com/${rpdbKey}/imdb/poster-default/${targetImdbId}.jpg`;
+  // دعم بوستر RPDB / البوسترات المجانية عند التفعيل
+  const activePosterKey = (rpdbKey === "free" || rpdbKey === "default") ? "t0-free-rpdb" : rpdbKey;
+  if (activePosterKey && targetImdbId) {
+    meta.poster = `https://api.ratingposterdb.com/${activePosterKey}/imdb/poster-default/${targetImdbId}.jpg`;
   } else if (tmdbAr?.poster) {
     meta.poster = tmdbAr.poster;
   }
@@ -1422,14 +1452,16 @@ async function buildArabicMeta(type, rawId, rpdbKey = null) {
     meta.links = [];
   }
 
-  // إضافة أزرار وشرائح التقييمات السباعية التفاعلية إلى meta.links
-  if (ratings.imdb) meta.links.unshift({ name: `⭐ IMDb ${ratings.imdb}`, category: "التقييمات", url: `https://www.imdb.com/title/${targetImdbId || ""}` });
-  if (ratings.rtCritics) meta.links.unshift({ name: `🍅 نقاد ${ratings.rtCritics}`, category: "التقييمات", url: `https://www.rottentomatoes.com/search?search=${encodeURIComponent(meta.name)}` });
-  if (ratings.rtAudience) meta.links.unshift({ name: `🍿 جمهور ${ratings.rtAudience}`, category: "التقييمات", url: `https://www.rottentomatoes.com/search?search=${encodeURIComponent(meta.name)}` });
-  if (ratings.metacritic) meta.links.unshift({ name: `Ⓜ️ ميتاريتك ${ratings.metacritic}`, category: "التقييمات", url: `https://www.metacritic.com/search/${encodeURIComponent(meta.name)}` });
-  if (ratings.letterboxd) meta.links.unshift({ name: `🟢 ليتربوكسد ${ratings.letterboxd}`, category: "التقييمات", url: `https://letterboxd.com/imdb/${targetImdbId || ""}/` });
-  if (ratings.trakt) meta.links.unshift({ name: `🔴 تراكت ${ratings.trakt}`, category: "التقييمات", url: `https://trakt.tv/search/imdb/${targetImdbId || ""}` });
-  if (ratings.tmdb) meta.links.unshift({ name: `🟦 TMDB ${ratings.tmdb}`, category: "التقييمات", url: `https://www.themoviedb.org` });
+  // إضافة أزرار وشرائح التقييمات السباعية التفاعلية إلى meta.links بالترتيب الدقيق
+  const ratingChips = [];
+  if (ratings.metacritic) ratingChips.push({ name: `Ⓜ️ ميتاريتك ${ratings.metacritic}`, category: "التقييمات", url: `https://www.metacritic.com/search/${encodeURIComponent(meta.name)}` });
+  if (ratings.rtAudience) ratingChips.push({ name: `🍿 جمهور ${ratings.rtAudience}`, category: "التقييمات", url: `https://www.rottentomatoes.com/search?search=${encodeURIComponent(meta.name)}` });
+  if (ratings.rtCritics) ratingChips.push({ name: `🍅 نقاد ${ratings.rtCritics}`, category: "التقييمات", url: `https://www.rottentomatoes.com/search?search=${encodeURIComponent(meta.name)}` });
+  if (ratings.letterboxd) ratingChips.push({ name: `🟢 ليتربوكسد ${ratings.letterboxd}`, category: "التقييمات", url: `https://letterboxd.com/imdb/${targetImdbId || ""}/` });
+  if (ratings.trakt) ratingChips.push({ name: `🔴 تراكت ${ratings.trakt}`, category: "التقييمات", url: `https://trakt.tv/search/imdb/${targetImdbId || ""}` });
+  if (ratings.tmdb) ratingChips.push({ name: `🔷 TMDB ${ratings.tmdb}`, category: "التقييمات", url: `https://www.themoviedb.org` });
+  if (ratings.imdb) ratingChips.push({ name: `⭐ IMDb ${ratings.imdb}`, category: "التقييمات", url: `https://www.imdb.com/title/${targetImdbId || ""}` });
+  meta.links.unshift(...ratingChips);
 
   // القصة العامة للفيلم أو المسلسل مع تضمين شريط التقييمات السباعي
   let plot = tmdbAr?.overview || pickPlot(base);
@@ -1787,12 +1819,22 @@ export default async function handler(req, res) {
       path = path.replace(debridMatch[0], "") || "/";
     }
 
-    // استخراج معلمات مفتاح RPDB للتقييمات
+    // استخراج معلمات مفتاح بوسترات التقييمات (RPDB / البديل المجاني العام)
     let customRpdbKey = null;
-    const rpdbMatch = path.match(/\/(rpdbkey=[a-zA-Z0-9_-]+|rpdb=[a-zA-Z0-9_-]+)/i);
+    const rpdbMatch = path.match(/\/(rpdbkey=[a-zA-Z0-9_-]+|rpdb=[a-zA-Z0-9_-]+|posters=[a-zA-Z0-9_-]+)/i);
     if (rpdbMatch) {
       customRpdbKey = rpdbMatch[1].split("=")[1];
+      if (customRpdbKey === "free" || customRpdbKey === "default") {
+        customRpdbKey = "t0-free-rpdb";
+      }
       path = path.replace(rpdbMatch[0], "") || "/";
+    }
+
+    if (!customRpdbKey) {
+      const qRpdb = req?.query?.rpdbkey || req?.query?.rpdb || req?.query?.posters;
+      if (qRpdb) {
+        customRpdbKey = (qRpdb === "free" || qRpdb === "default") ? "t0-free-rpdb" : qRpdb;
+      }
     }
 
     let lite = false;
@@ -2116,9 +2158,10 @@ export default async function handler(req, res) {
           genres: localizeGenres(m.genres)
         };
 
-        // دعم بوسترات RPDB للكتالوج
-        if (customRpdbKey && entry.id && entry.id.startsWith("tt")) {
-          entry.poster = `https://api.ratingposterdb.com/${customRpdbKey}/imdb/poster-default/${entry.id}.jpg`;
+        // دعم بوسترات التقييمات للكتالوج (RPDB أو البديل المجاني العام)
+        const activeCatKey = (customRpdbKey === "free" || customRpdbKey === "default") ? "t0-free-rpdb" : customRpdbKey;
+        if (activeCatKey && entry.id && entry.id.startsWith("tt")) {
+          entry.poster = `https://api.ratingposterdb.com/${activeCatKey}/imdb/poster-default/${entry.id}.jpg`;
         }
 
         cleanMetas.push(entry);
