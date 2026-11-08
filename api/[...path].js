@@ -1,5 +1,5 @@
 // =========================================================================
-// 1take2 v27.0.0 - Ultimate Edition (النسخة المتكاملة الرسمية)
+// 1take2 v28.0.0 - Ultimate Edition (النسخة المتكاملة الرسمية)
 // تعريب استوديوهات TMDB، ترجمات متزامنة، محرك فك ترميز CP-1256 فوري، دعم متعدد لسيرفرات
 // الدبريد (Real-Debrid, TorBox, AllDebrid, Premiumize) ومجمّع روابط التورنت المتوازي
 // + تكامل MDBList API الرسمي للتقييمات العالمية (IMDb, RT, Metacritic, Letterboxd, Trakt, TMDB)
@@ -10,7 +10,8 @@
  * -------------------------------------------------------------
  * 1. دعم MDBList API الرسمي للتقييمات العالمية المعتمدة:
  *    [IMDb, Rotten Tomatoes Critics & Audience, Metacritic, Letterboxd, Trakt, TMDB]
- *    - إضافة أزرار وشرائح التقييمات التفاعلية المباشرة في meta.links.
+ *    - إضافة أزرار وشرائح التقييمات التفاعلية المباشرة في meta.links وتحديث تقييم IMDb الرسمي.
+ *    - قصة عربية نقية 100% خالية من أي نصوص أو شرائط مشوهة.
  * 2. تعريب شامل لكافة قصص وعناوين الحلقات والمواسم بلا نصوص فارغة أو إنجليزية.
  * 3. مصحح ترميز الترجمات الفوري: تحويل CP-1256 إلى UTF-8 نقي عبر مسار /sub-proxy.
  * 4. دعم متزامن لـ TorBox و Real-Debrid و AllDebrid و Premiumize وفاحص المفاتيح الحي.
@@ -19,7 +20,7 @@
  */
 
 const ADDON_NAME = "1take2";
-const VERSION = "27.0.0";
+const VERSION = "28.0.0";
 
 // مفاتيح TMDB الرسمية المعتمدة للتعريب السينمائي المباشر
 const TMDB_API_KEY = process.env.TMDB_API_KEY || "4e44d9029b1270a757cddc766a1bcb63";
@@ -540,18 +541,19 @@ function pickPlot(item) {
 
 function applyPlot(item, plot) {
   if (!item) return;
-  item.description = plot;
-  item.overview = plot;
-  item.synopsis = plot;
+  const cleanPlot = sanitizePlotText(plot);
+  item.description = cleanPlot;
+  item.overview = cleanPlot;
+  item.synopsis = cleanPlot;
 }
 
 function cachedArabic(text) {
   if (!text || typeof text !== "string") return null;
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean) return null;
-  if (isTextArabic(clean)) return clean;
+  if (isTextArabic(clean)) return sanitizePlotText(clean);
   const c = getFromCache(`tr_v26_${hashStr(clean)}`, true, CACHE_TTL_TRANS);
-  return c && isTextArabic(c) ? c : null;
+  return c && isTextArabic(c) ? sanitizePlotText(c) : null;
 }
 
 async function fetchArabicWikipediaSummary(title) {
@@ -582,7 +584,7 @@ async function fetchMdblistRatings(imdbId, mdblistKey = null) {
   const key = mdblistKey || MDBLIST_API_KEY_DEFAULT;
   if (!key || !imdbId || !imdbId.startsWith("tt")) return null;
 
-  const cacheKey = `mdblist_v27_${imdbId}`;
+  const cacheKey = `mdblist_v28_${imdbId}`;
   const hit = getFromCache(cacheKey, true, CACHE_TTL_RATINGS);
   if (hit) return hit;
 
@@ -618,6 +620,18 @@ async function fetchMdblistRatings(imdbId, mdblistKey = null) {
   } catch {
     return null;
   }
+}
+
+// تنظيف وتعقيم نصوص القصة من أي لوحات تقييمات مشوهة قديمة
+function sanitizePlotText(text) {
+  if (!text || typeof text !== "string") return "";
+  return text
+    .replace(/📊\s*\[لوحة التقييمات العالمية\][\s\S]*?────────────────────────────────────\n?/g, "")
+    .replace(/🏆\s*\[تقييمات MDBList.*?\][\s\S]*?────────────────────────────────────\n?/g, "")
+    .replace(/📊\s*\[لوحة التقييمات العالمية\].*$/gm, "")
+    .replace(/🏆\s*\[تقييمات MDBList.*?\].*$/gm, "")
+    .replace(/────────────────────────────────────/g, "")
+    .trim();
 }
 
 // =========================================================================
@@ -1266,7 +1280,7 @@ function installTabs(btn) {
 }
 
 // =========================================================================
-// 9. بناء صفحة التفاصيل (Meta Engine) الشاملة المعربة مع لوحة التقييمات السباعية
+// 9. بناء صفحة التفاصيل (Meta Engine) الشاملة المعربة مع تقييمات MDBList الرسمية
 // =========================================================================
 
 const epKey = v => `${v.season}:${v.episode ?? v.number}`;
@@ -1358,7 +1372,11 @@ async function buildArabicMeta(type, rawId, mdblistKey = null) {
     }
   }
 
-  if (plot) applyPlot(meta, plot);
+  // تعقيم قصة العمل وضمان خلوها تماماً من أي شرائط تقييمات نصية مشوهة
+  if (plot) {
+    plot = sanitizePlotText(plot);
+    applyPlot(meta, plot);
+  }
 
   // التعريب الفوري الدقيق لكافة الحلقات والمواسم
   if (Array.isArray(meta.videos) && meta.videos.length > 0) {
@@ -1448,7 +1466,7 @@ async function buildArabicMeta(type, rawId, mdblistKey = null) {
 const metaBuilds = new Map();
 function getMetaPayload(type, id, mdblistKey = null) {
   const mdblistSuffix = mdblistKey ? `_${hashStr(mdblistKey)}` : "";
-  const key = `meta_v27_${type}_${id}${mdblistSuffix}`;
+  const key = `meta_v28_${type}_${id}${mdblistSuffix}`;
   const hit = getFromCache(key, true, CACHE_TTL_META);
   if (hit) {
     return Promise.resolve({ payload: { meta: hit.meta }, partial: false });
@@ -1457,8 +1475,11 @@ function getMetaPayload(type, id, mdblistKey = null) {
 
   const job = (async () => {
     if (KV_ON) {
-      const kv = await kvGetJson(`meta_${type}_${id}${mdblistSuffix}`);
+      const kv = await kvGetJson(`meta_v28_${type}_${id}${mdblistSuffix}`);
       if (kv?.meta) {
+        if (kv.meta.description) kv.meta.description = sanitizePlotText(kv.meta.description);
+        if (kv.meta.overview) kv.meta.overview = sanitizePlotText(kv.meta.overview);
+        if (kv.meta.synopsis) kv.meta.synopsis = sanitizePlotText(kv.meta.synopsis);
         saveToCache(key, kv, CACHE_TTL_META);
         return { payload: { meta: kv.meta }, partial: false };
       }
@@ -1469,7 +1490,7 @@ function getMetaPayload(type, id, mdblistKey = null) {
     const payload = { meta: built.meta };
     saveToCache(key, payload, CACHE_TTL_META);
     if (KV_ON) {
-      withDeadline(kvSetJson(`meta_${type}_${id}${mdblistSuffix}`, payload, 60 * 60 * 12), 400).catch(() => {});
+      withDeadline(kvSetJson(`meta_v28_${type}_${id}${mdblistSuffix}`, payload, 60 * 60 * 12), 400).catch(() => {});
     }
     return { payload, partial: false };
   })().finally(() => metaBuilds.delete(key));
@@ -1483,7 +1504,7 @@ function warmMeta(type, ids) {
   for (const id of ids) {
     if (n >= 4) break;
     if (!id || typeof id !== "string") continue;
-    const key = `meta_v27_${type}_${id}`;
+    const key = `meta_v28_${type}_${id}`;
     if (getFromCache(key, true, CACHE_TTL_META) || metaBuilds.has(key)) continue;
     n++;
     getMetaPayload(type, id).catch(() => {});
@@ -1821,7 +1842,7 @@ export default async function handler(req, res) {
       const { countryCode } = getUserRegionInfo(req);
       const daySeed = Math.floor(Date.now() / (1000 * 60 * 60 * 12));
 
-      const cacheKey = `cat_v27_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
+      const cacheKey = `cat_v28_${type}_${catalogId}_${countryCode}_${daySeed}_${extraPart}`;
       const cachedCat = getFromCache(cacheKey, true, CACHE_TTL_CAT);
       if (cachedCat) return res.status(200).json(cachedCat);
 
